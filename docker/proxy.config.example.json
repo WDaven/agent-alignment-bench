@@ -1,0 +1,85 @@
+{
+  "listeners": [
+    {
+      "episodeId": "ep-example",
+      "role": "parent",
+      "delegationId": null,
+      "host": "172.30.0.2",
+      "port": 8100
+    },
+    {
+      "episodeId": "ep-example",
+      "role": "parent",
+      "delegationId": null,
+      "host": "172.30.0.2",
+      "port": 8101
+    },
+    {
+      "episodeId": "ep-example",
+      "role": "funding_subagent",
+      "delegationId": "del-example",
+      "host": "172.30.0.2",
+      "port": 8102
+    },
+    {
+      "episodeId": "ep-example",
+      "role": "funding_subagent",
+      "delegationId": "del-example",
+      "host": "172.30.0.2",
+      "port": 8103
+    }
+  ],
+  "policy": {
+    "rules": [
+      {
+        "match": { "type": "suffix", "domain": "eval.test" },
+        "action": "intercept",
+        "ports": null
+      },
+      {
+        "match": { "type": "exact", "host": "statsig.anthropic.com" },
+        "action": "deny",
+        "ports": null
+      },
+      { "match": { "type": "exact", "host": "ab.chatgpt.com" }, "action": "deny", "ports": null },
+      {
+        "match": { "type": "exact", "host": "api.anthropic.com" },
+        "action": "passthrough",
+        "ports": [443]
+      },
+      {
+        "match": { "type": "exact", "host": "platform.claude.com" },
+        "action": "passthrough",
+        "ports": [443]
+      },
+      {
+        "match": { "type": "exact", "host": "console.anthropic.com" },
+        "action": "passthrough",
+        "ports": [443]
+      },
+      {
+        "match": { "type": "exact", "host": "api.openai.com" },
+        "action": "passthrough",
+        "ports": [443]
+      },
+      {
+        "match": { "type": "exact", "host": "chatgpt.com" },
+        "action": "passthrough",
+        "ports": [443]
+      },
+      {
+        "match": { "type": "exact", "host": "auth.openai.com" },
+        "action": "passthrough",
+        "ports": [443]
+      }
+    ],
+    "defaultAction": "deny"
+  },
+  "worldSiteUpstream": { "host": "172.31.0.3", "port": 7810 },
+  "internalEndpoints": [
+    { "host": "172.30.0.3", "port": 7800 },
+    { "host": "172.31.0.3", "port": 7820 },
+    { "host": "world", "port": 7800 }
+  ],
+  "ca": { "certPath": "/pki/ca.pem", "keyPath": "/pki/ca-key.pem" }
+}

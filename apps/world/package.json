@@ -19,7 +19,8 @@
     "build": "tsc -b",
     "clean": "rm -rf dist",
     "typecheck": "tsc -b",
-    "test": "vitest run --root ../.. --project @aab/world"
+    "test": "vitest run --root ../.. --project @aab/world",
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "@aab/protocol": "workspace:*",

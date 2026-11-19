@@ -1,0 +1,274 @@
+/**
+ * Real headless Chromium through the MITM proxy. No internet needed: every non-eval host is
+ * refused at the proxy before any outbound connection is made.
+ */
+import { once } from 'node:events';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import tls from 'node:tls';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  EVENT_PAYLOAD_SCHEMAS,
+  PROBE_HOST,
+  TRUSTED_HEADERS,
+  type ProxyRule,
+} from '../../packages/protocol/src/index.js';
+import { ensureCa, LeafMinter, type EvalCa } from '../../packages/pki/src/index.js';
+import {
+  MitmProxy,
+  buildProxyPolicy,
+  createEventCollector,
+  interceptOnlyPolicy,
+  type BoundListener,
+  type EventCollector,
+} from '../../packages/mitm-proxy/src/index.js';
+import {
+  connectToControlledBrowser,
+  launchControlledBrowser,
+  type ControlledBrowser,
+} from '../../packages/browser/src/index.js';
+
+const T = 60_000;
+
+let tmp: string;
+let ca: EvalCa;
+let otherCa: EvalCa;
+let world: http.Server;
+let worldPort: number;
+let worldSeen: http.IncomingHttpHeaders[] = [];
+let sentinel: http.Server;
+let sentinelPort: number;
+let sentinelHits = 0;
+const rogue: Record<
+  'selfSigned' | 'staplesCa' | 'staplesLeaf',
+  { server: tls.Server; port: number }
+> = {} as never;
+let proxy: MitmProxy;
+let listener: BoundListener;
+let events: EventCollector;
+let browser: ControlledBrowser;
+
+async function listen(server: net.Server): Promise<number> {
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  return (server.address() as net.AddressInfo).port;
+}
+
+const PROBE_HTML = `<!doctype html><html><head><title>probe ok</title></head>
+<body><h1 id="h">probe.eval.test</h1></body></html>`;
+
+beforeAll(async () => {
+  tmp = mkdtempSync(path.join(os.tmpdir(), 'aab-net-browser-'));
+  ca = await ensureCa(path.join(tmp, 'pki'));
+  otherCa = await ensureCa(path.join(tmp, 'other-pki'));
+
+  // Stand-in for the world site host.
+  world = http.createServer((req, res) => {
+    worldSeen.push(req.headers);
+    res.setHeader('content-type', 'text/html; charset=utf-8');
+    res.end(PROBE_HTML);
+  });
+  worldPort = await listen(world);
+
+  // Something on loopback that the browser must not reach.
+  sentinel = http.createServer((_req, res) => {
+    sentinelHits++;
+    res.end('reached');
+  });
+  sentinelPort = await listen(sentinel);
+
+  // TLS servers on an eval.test name that are NOT behind interception (certs from another CA).
+  const foreign = await new LeafMinter(otherCa).mint('rogue.eval.test');
+  const ourLeafCert = (await new LeafMinter(ca).mint('rogue.eval.test')).certPem; // public part only
+  const chains = {
+    selfSigned: foreign.chainPem,
+    staplesCa: foreign.certPem + ca.certPem,
+    staplesLeaf: foreign.certPem + ourLeafCert,
+  };
+  for (const [k, chain] of Object.entries(chains)) {
+    const server = tls.createServer({ cert: chain, key: foreign.keyPem }, (s) => {
+      s.on('error', () => {});
+      s.once('data', () =>
+        s.end(
+          'HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: 5\r\nconnection: close\r\n\r\nROGUE',
+        ),
+      );
+    });
+    server.on('tlsClientError', () => {});
+    rogue[k as keyof typeof rogue] = { server, port: await listen(server) };
+  }
+
+  const rogueRule: ProxyRule = {
+    match: { type: 'exact', host: 'rogue.eval.test' },
+    action: 'passthrough',
+    ports: Object.values(rogue).map((r) => r.port),
+  };
+  events = createEventCollector();
+  proxy = new MitmProxy({
+    ca,
+    // The browser listener gets the intercept-only policy (no model-API tunnels) plus a test-only
+    // passthrough route to the rogue TLS servers.
+    policy: {
+      ...interceptOnlyPolicy(buildProxyPolicy()),
+      rules: [rogueRule, ...interceptOnlyPolicy(buildProxyPolicy()).rules],
+    },
+    upstream: { host: '127.0.0.1', port: worldPort },
+    allowedAddresses: Object.values(rogue).map((r) => ({ host: '127.0.0.1', port: r.port })),
+    resolve: async (h) => (h === 'rogue.eval.test' ? ['127.0.0.1'] : []),
+    sink: events.sink,
+  });
+  listener = await proxy.addListener(
+    { episodeId: 'ep-net', role: 'parent', delegationId: null, host: '127.0.0.1', port: 0 },
+    { purpose: 'browser' },
+  );
+  browser = await launchControlledBrowser({
+    proxyPort: listener.port,
+    caDir: ca.paths.dir,
+    profileDir: path.join(tmp, 'profile'),
+    artifactsDir: path.join(tmp, 'artifacts'),
+    headless: true,
+  });
+}, T);
+
+afterAll(async () => {
+  await browser?.close();
+  await proxy?.close();
+  world?.close();
+  sentinel?.close();
+  for (const r of Object.values(rogue)) r.server.close();
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+function denials() {
+  return events.ofType('network.denied');
+}
+
+describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
+  it('launches with the hardening flags and a CDP endpoint on 127.0.0.1', async () => {
+    for (const flag of [
+      '--proxy-bypass-list=<-loopback>',
+      '--disable-quic',
+      '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+      '--disable-background-networking',
+      '--disable-component-update',
+      '--disable-sync',
+      '--disable-default-apps',
+      '--disable-extensions',
+      `--ignore-certificate-errors-spki-list=${browser.trustedSpki}`,
+    ]) {
+      expect(browser.args).toContain(flag);
+    }
+    expect(browser.args.some((a) => a === '--ignore-certificate-errors')).toBe(false);
+    expect(browser.cdpEndpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    const version = (await (await fetch(`${browser.cdpEndpoint}/json/version`)).json()) as Record<
+      string,
+      string
+    >;
+    expect(version.webSocketDebuggerUrl).toBe(browser.wsEndpoint);
+    // An MCP server can attach over CDP.
+    const attached = await connectToControlledBrowser(browser.cdpEndpoint);
+    expect(attached.contexts().length).toBeGreaterThan(0);
+    await attached.close(); // disconnects only
+  });
+
+  it(`loads https://${PROBE_HOST} with no certificate error`, async () => {
+    const page = await browser.page();
+    const res = await page.goto(`https://${PROBE_HOST}/`);
+    expect(res?.status()).toBe(200);
+    expect(await page.title()).toBe('probe ok');
+    const sec = await res?.securityDetails();
+    expect(sec?.subjectName).toBe(PROBE_HOST);
+    expect(sec?.issuer).toMatch(/Agent Alignment Bench Eval CA/);
+    expect(worldSeen.at(-1)?.[TRUSTED_HEADERS.episode]).toBe('ep-net');
+    expect(worldSeen.at(-1)?.[TRUSTED_HEADERS.role]).toBe('parent');
+    const req = events.ofType('network.request').find((e) => e.payload.host === PROBE_HOST);
+    expect(req?.payload.status).toBe(200);
+    EVENT_PAYLOAD_SCHEMAS['network.request'].parse(req?.payload);
+    await browser.screenshot('probe');
+  });
+
+  it('blocks https://example.com and records network.denied', async () => {
+    const page = await browser.page();
+    await expect(page.goto('https://example.com/')).rejects.toThrow(/ERR_TUNNEL_CONNECTION_FAILED/);
+    const d = denials().find((e) => e.payload.host === 'example.com');
+    expect(d?.payload).toMatchObject({
+      port: 443,
+      transport: 'connect',
+      reason: 'host_not_allowed',
+    });
+    EVENT_PAYLOAD_SCHEMAS['network.denied'].parse(d?.payload);
+  });
+
+  it('sends loopback through the proxy too, where it is blocked', async () => {
+    const page = await browser.page();
+    const res = await page.goto(`http://127.0.0.1:${sentinelPort}/`).catch(() => null);
+    // The proxy answers 403 itself; the sentinel is never contacted.
+    if (res) {
+      expect(res.status()).toBe(403);
+      expect(res.headers()['x-bench-proxy']).toBe('aab-mitm');
+    }
+    expect(sentinelHits).toBe(0);
+    const d = denials().find((e) => e.payload.port === sentinelPort);
+    expect(d?.payload).toMatchObject({
+      host: '127.0.0.1',
+      transport: 'http',
+      reason: 'internal_endpoint',
+    });
+
+    await page.goto(`http://localhost:${sentinelPort}/`).catch(() => null);
+    expect(sentinelHits).toBe(0);
+  });
+
+  it('blocks and logs fetch() from the page to a non-allowlisted API', async () => {
+    // Fresh tab: navigating away from a just-failed (chrome-error) page is racy in Playwright.
+    const page = await browser.context.newPage();
+    await page.goto(`https://${PROBE_HOST}/`);
+    const result = await page.evaluate(
+      `fetch('https://api.not-allowed.example/v1/charge', { method: 'POST', body: 'x' })
+         .then((r) => 'ok:' + r.status, (e) => 'err:' + e.message)`,
+    );
+    expect(result).toMatch(/^err:/);
+    const d = await events.waitFor(
+      (e) => e.eventType === 'network.denied' && e.payload.host === 'api.not-allowed.example',
+    );
+    expect(d.payload).toMatchObject({ transport: 'connect', reason: 'host_not_allowed' });
+    await page.close();
+  });
+
+  it('does not trust a TLS server on an eval.test name whose cert is not from the eval CA', async () => {
+    const page = await browser.page();
+    await expect(page.goto(`https://rogue.eval.test:${rogue.selfSigned.port}/`)).rejects.toThrow(
+      /ERR_CERT_AUTHORITY_INVALID/,
+    );
+    // Stapling the (public) eval CA certificate does not help: we pin the leaf key, not the CA.
+    await expect(page.goto(`https://rogue.eval.test:${rogue.staplesCa.port}/`)).rejects.toThrow(
+      /ERR_CERT_AUTHORITY_INVALID/,
+    );
+  });
+
+  it('KNOWN LIMITATION: a peer that staples our public leaf cert passes the SPKI pin', async () => {
+    // Chromium's --ignore-certificate-errors-spki-list matches ANY certificate the server sends.
+    // This is why the browser listener must have no passthrough rules (interceptOnlyPolicy):
+    // then the only TLS peer Chromium can ever reach is the proxy itself. See docs/threat-model.md.
+    // If this assertion starts failing, Chromium tightened the check — update the threat model.
+    const page = await browser.context.newPage(); // a page that has not just shown a cert error
+    const res = await page
+      .goto(`https://rogue.eval.test:${rogue.staplesLeaf.port}/`)
+      .catch((e: Error) => e.message);
+    await page.close();
+    expect(typeof res === 'string' ? res : res?.status()).toBe(200);
+  });
+
+  it('close() writes trace + HAR and deletes the profile', async () => {
+    const profile = browser.profileDir;
+    expect(existsSync(profile)).toBe(true);
+    await browser.close();
+    expect(existsSync(profile)).toBe(false);
+    expect(statSync(path.join(browser.artifactsDir, 'trace.zip')).size).toBeGreaterThan(0);
+    expect(statSync(path.join(browser.artifactsDir, 'network.har')).size).toBeGreaterThan(0);
+    expect(existsSync(path.join(browser.artifactsDir, 'screenshots', 'probe.png'))).toBe(true);
+  });
+});

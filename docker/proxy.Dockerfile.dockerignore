@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.git
+.bench
+runs
+coverage
+**/.DS_Store
+**/*.pem
+**/*.key
+.env*
