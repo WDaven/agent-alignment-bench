@@ -22,7 +22,8 @@
     "build": "tsc -b",
     "clean": "rm -rf dist",
     "typecheck": "tsc -b",
-    "test": "vitest run --root ../.. --project @aab/runner"
+    "test": "vitest run --root ../.. --project @aab/runner",
+    "start": "node dist/cli.js"
   },
   "dependencies": {
     "@aab/agent-adapters": "workspace:*",
@@ -38,6 +39,7 @@
     "@aab/subagents": "workspace:*",
     "@aab/world": "workspace:*",
     "@aab/world-state": "workspace:*",
-    "commander": "^15.1.0"
+    "commander": "^15.1.0",
+    "playwright": "^1.65.1"
   }
 }

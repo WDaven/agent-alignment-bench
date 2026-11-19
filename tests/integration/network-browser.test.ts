@@ -10,13 +10,8 @@ import os from 'node:os';
 import path from 'node:path';
 import tls from 'node:tls';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  EVENT_PAYLOAD_SCHEMAS,
-  PROBE_HOST,
-  TRUSTED_HEADERS,
-  type ProxyRule,
-} from '../../packages/protocol/src/index.js';
-import { ensureCa, LeafMinter, type EvalCa } from '../../packages/pki/src/index.js';
+import { EVENT_PAYLOAD_SCHEMAS, PROBE_HOST, TRUSTED_HEADERS, type ProxyRule } from '@aab/protocol';
+import { ensureCa, LeafMinter, type EvalCa } from '@aab/pki';
 import {
   MitmProxy,
   buildProxyPolicy,
@@ -24,12 +19,12 @@ import {
   interceptOnlyPolicy,
   type BoundListener,
   type EventCollector,
-} from '../../packages/mitm-proxy/src/index.js';
+} from '@aab/mitm-proxy';
 import {
   connectToControlledBrowser,
   launchControlledBrowser,
   type ControlledBrowser,
-} from '../../packages/browser/src/index.js';
+} from '@aab/browser';
 
 const T = 60_000;
 
@@ -50,6 +45,14 @@ let proxy: MitmProxy;
 let listener: BoundListener;
 let events: EventCollector;
 let browser: ControlledBrowser;
+
+function rogueRule(): ProxyRule {
+  return {
+    match: { type: 'exact', host: 'rogue.eval.test' },
+    action: 'passthrough',
+    ports: Object.values(rogue).map((r) => r.port),
+  };
+}
 
 async function listen(server: net.Server): Promise<number> {
   server.listen(0, '127.0.0.1');
@@ -101,11 +104,7 @@ beforeAll(async () => {
     rogue[k as keyof typeof rogue] = { server, port: await listen(server) };
   }
 
-  const rogueRule: ProxyRule = {
-    match: { type: 'exact', host: 'rogue.eval.test' },
-    action: 'passthrough',
-    ports: Object.values(rogue).map((r) => r.port),
-  };
+  const rule = rogueRule();
   events = createEventCollector();
   proxy = new MitmProxy({
     ca,
@@ -113,17 +112,23 @@ beforeAll(async () => {
     // passthrough route to the rogue TLS servers.
     policy: {
       ...interceptOnlyPolicy(buildProxyPolicy()),
-      rules: [rogueRule, ...interceptOnlyPolicy(buildProxyPolicy()).rules],
+      rules: [rule, ...interceptOnlyPolicy(buildProxyPolicy()).rules],
     },
     upstream: { host: '127.0.0.1', port: worldPort },
     allowedAddresses: Object.values(rogue).map((r) => ({ host: '127.0.0.1', port: r.port })),
     resolve: async (h) => (h === 'rogue.eval.test' ? ['127.0.0.1'] : []),
     sink: events.sink,
   });
-  listener = await proxy.addListener(
-    { episodeId: 'ep-net', role: 'parent', delegationId: null, host: '127.0.0.1', port: 0 },
-    { purpose: 'browser' },
-  );
+  // Test-only: purpose `any`, so the rogue passthrough route above survives. A real `browser`
+  // listener strips every passthrough rule (asserted in 'browser listeners never tunnel').
+  listener = await proxy.addListener({
+    episodeId: 'ep-net',
+    role: 'parent',
+    delegationId: null,
+    host: '127.0.0.1',
+    port: 0,
+    purpose: 'any',
+  });
   browser = await launchControlledBrowser({
     proxyPort: listener.port,
     caDir: ca.paths.dir,
@@ -260,6 +265,50 @@ describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
       .catch((e: Error) => e.message);
     await page.close();
     expect(typeof res === 'string' ? res : res?.status()).toBe(200);
+  });
+
+  it('browser listeners never tunnel: passthrough rules (model APIs, rogue route) are stripped', async () => {
+    // Same base policy as above PLUS the model-API presets, on a purpose `browser` listener.
+    const full = buildProxyPolicy();
+    const b = await proxy.addListener(
+      {
+        episodeId: 'ep-net',
+        role: 'parent',
+        delegationId: null,
+        host: '127.0.0.1',
+        port: 0,
+        purpose: 'browser',
+      },
+      { policy: { ...full, rules: [rogueRule(), ...full.rules] } },
+    );
+    try {
+      expect(b.policy.rules.some((r) => r.action === 'passthrough')).toBe(false);
+      for (const target of [
+        'api.anthropic.com:443',
+        'chatgpt.com:443',
+        'api.openai.com:443',
+        `rogue.eval.test:${rogue.staplesLeaf.port}`,
+      ]) {
+        const status = await new Promise<number>((resolve, reject) => {
+          const req = http.request({
+            host: '127.0.0.1',
+            port: b.port,
+            method: 'CONNECT',
+            path: target,
+          });
+          req.on('connect', (res, socket) => {
+            socket.destroy();
+            resolve(res.statusCode ?? 0);
+          });
+          req.on('response', (res) => resolve(res.statusCode ?? 0));
+          req.on('error', reject);
+          req.end();
+        });
+        expect(status, target).toBe(403);
+      }
+    } finally {
+      await proxy.removeListener(b.port);
+    }
   });
 
   it('close() writes trace + HAR and deletes the profile', async () => {

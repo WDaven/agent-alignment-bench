@@ -13,6 +13,12 @@ export const TRUSTED_HEADERS = {
   delegation: 'x-bench-delegation',
   /** Proxy-assigned request id, echoed in network.request. */
   requestId: 'x-bench-request-id',
+  /**
+   * Shared secret between proxy and world site host. The site host refuses any request without
+   * it, so reaching the site-host port directly (bypassing the proxy) cannot forge an identity.
+   * Like every `x-bench-*` header it is stripped from client input before the proxy adds it.
+   */
+  proxySecret: 'x-bench-proxy-secret',
 } as const;
 export type TrustedHeaderName = (typeof TRUSTED_HEADERS)[keyof typeof TRUSTED_HEADERS];
 
@@ -98,7 +104,17 @@ export function decideProxyAction(
   return policy.defaultAction;
 }
 
-/** One listener per role per episode; the port identifies the caller. */
+/**
+ * What a listener serves.
+ * - `browser`: the harness Chromium. ALWAYS gets the intercept-only policy (no passthrough), because
+ *   Chromium's SPKI pin would accept a peer that staples our public leaf certificate (threat model).
+ * - `cli`: the agent CLI process itself (model-API passthrough allowed by the policy).
+ * - `any`: tests / ad-hoc tools; uses the configured policy as is.
+ */
+export const ListenerPurposeSchema = z.enum(['browser', 'cli', 'any']);
+export type ListenerPurpose = z.infer<typeof ListenerPurposeSchema>;
+
+/** One listener per (episode, role, delegation, purpose); the port identifies the caller. */
 export const ProxyListenerSchema = z.strictObject({
   episodeId: EpisodeIdSchema,
   role: AgentRoleSchema,
@@ -107,18 +123,53 @@ export const ProxyListenerSchema = z.strictObject({
   host: z.string().min(1),
   /** 0 = pick a free port; the proxy reports the bound port. */
   port: z.number().int().min(0).max(65535),
+  purpose: ListenerPurposeSchema.default('any'),
 });
 export type ProxyListener = z.infer<typeof ProxyListenerSchema>;
+export type ProxyListenerInput = z.input<typeof ProxyListenerSchema>;
 
 export const ProxyConfigSchema = z.strictObject({
-  listeners: z.array(ProxyListenerSchema).min(1),
+  /** Static listeners (may be empty when listeners are added at runtime via `control`). */
+  listeners: z.array(ProxyListenerSchema),
+  /** Policy for `cli`/`any` listeners. `browser` listeners get it minus every passthrough rule. */
   policy: ProxyPolicySchema,
   /** Where intercepted *.eval.test requests are forwarded (world site host listener). */
-  worldSiteUpstream: z.strictObject({ host: z.string(), port: z.number().int().min(1).max(65535) }),
+  worldSiteUpstream: z.strictObject({
+    host: z.string(),
+    port: z.number().int().min(1).max(65535),
+    /**
+     * File holding the proxy→site-host shared secret (TRUSTED_HEADERS.proxySecret). null = none
+     * (only acceptable when the site host is unreachable except through the proxy).
+     */
+    secretFile: z.string().nullable().default(null),
+  }),
   /** Hosts:ports the proxy must never reach (world admin API, agent API). */
   internalEndpoints: z.array(
     z.strictObject({ host: z.string(), port: z.number().int().min(1).max(65535) }),
   ),
   ca: z.strictObject({ certPath: z.string(), keyPath: z.string() }),
+  /**
+   * Runtime control endpoint (add/remove listeners, drain events) for the containerised proxy.
+   * Must bind to a harness-only address; every request needs `Authorization: Bearer <token>`
+   * read from `tokenFile`. null = no control endpoint (static listeners only).
+   */
+  control: z
+    .strictObject({
+      host: z.string().min(1),
+      port: z.number().int().min(0).max(65535),
+      tokenFile: z.string().min(1),
+    })
+    .nullable()
+    .default(null),
 });
 export type ProxyConfig = z.infer<typeof ProxyConfigSchema>;
+export type ProxyConfigInput = z.input<typeof ProxyConfigSchema>;
+
+/** Control endpoint paths (proxy `control` listener). */
+export const PROXY_CONTROL_PATHS = {
+  listeners: '/v1/listeners',
+  listener: (port: number) => `/v1/listeners/${port}`,
+  /** `GET ?after=<n>` → `{ events: [{ n, episodeId, listenerPort, event }], next }`. */
+  events: '/v1/events',
+  health: '/v1/health',
+} as const;

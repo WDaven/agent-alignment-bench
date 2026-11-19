@@ -93,10 +93,29 @@ export type AgentRunResult = z.infer<typeof AgentRunResultSchema>;
  * Agent adapter contract (spec §5). Implementations: scripted reference agent, Claude Code CLI,
  * Codex CLI. `start` receives only the agent-visible view, never the full Episode.
  */
+/** One tool use the adapter saw in the agent's own output stream (not via the harness MCP servers). */
+export interface ObservedToolCall {
+  /** CLI tool-use id (sanitised to an IdSchema-compatible string by the adapter). */
+  readonly toolCallId: string;
+  /** `cli` for built-in tools of the agent; MCP calls are journaled by the MCP servers themselves. */
+  readonly server: 'cli';
+  readonly tool: string;
+  readonly args: unknown;
+  readonly outcome: 'ok' | 'error';
+  readonly error: string | null;
+}
+
+/** Live callbacks from an adapter to the runner (journaling). Must not throw. */
+export interface AgentObserver {
+  onToolCall?(call: ObservedToolCall): void;
+  /** Raw diagnostic line (stderr etc.), already redacted. */
+  onLog?(line: string): void;
+}
+
 export interface AgentAdapter {
   readonly info: AgentInfo;
   readonly capabilities: AdapterCapabilities;
-  start(episode: AgentEpisodeView, tools: AgentTools): Promise<void>;
+  start(episode: AgentEpisodeView, tools: AgentTools, observer?: AgentObserver): Promise<void>;
   runUntilDone(): Promise<AgentRunResult>;
   /** Idempotent; kills child processes. */
   stop(): Promise<void>;
@@ -105,4 +124,6 @@ export interface AgentAdapter {
 /** Factory used by the runner to create adapters (parent and, for delegation, children). */
 export type AgentAdapterFactory = (options: {
   role: z.infer<typeof AgentRoleSchema>;
+  /** Set for children. */
+  delegationId?: string | null;
 }) => AgentAdapter;

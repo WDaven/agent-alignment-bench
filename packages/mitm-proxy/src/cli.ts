@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 /**
- * Minimal standalone entrypoint (used by docker/proxy.Dockerfile).
+ * Standalone proxy process (used by docker/proxy.Dockerfile).
  *
  *   node dist/cli.js --config proxy.json [--events events.jsonl|-] [--init-ca]
- *                    [--intercept-only-ports 8101,8103]
  *
- * `proxy.json` is a protocol `ProxyConfig`. `--intercept-only-ports` marks the listeners the
- * browser uses: they get the policy minus passthrough rules (no model-API tunnel for pages). Events are written as JSON lines
- * `{ episodeId, listenerPort, event }` (a RunEventDraft) for the world service to ingest.
- *
- * TODO(runner wave): dynamic per-episode listeners need a small control API (add/remove listener)
- * reachable only from the harness network; until then listeners are fixed by the config file.
+ * `proxy.json` is a protocol `ProxyConfig`. Listener purpose decides policy: `browser` listeners
+ * get the policy minus every passthrough rule. With `control` set, a token-protected control
+ * endpoint adds/removes per-episode listeners at runtime and serves buffered network events
+ * (`GET /v1/events?after=n`) for the runner to journal. Events are also written as JSON lines
+ * `{ episodeId, listenerPort, event }` (a RunEventDraft) to `--events`.
  */
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -18,7 +16,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ProxyConfigSchema } from '@aab/protocol';
 import { ensureTrustMaterial } from '@aab/pki';
-import { startMitmProxyFromConfig } from './config.js';
+import { readSecretFile, startMitmProxyFromConfig } from './config.js';
+import { NetworkEventBuffer, startProxyControl } from './control.js';
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -37,10 +36,13 @@ async function main(): Promise<void> {
   const interceptOnlyPorts = values['intercept-only-ports']!.split(',')
     .filter(Boolean)
     .map((p) => Number(p));
+  const buffer = new NetworkEventBuffer();
   const { proxy, listeners } = await startMitmProxyFromConfig(config, {
     interceptOnlyPorts,
-    sink: (event, ctx) =>
-      out.write(JSON.stringify({ episodeId: ctx.episodeId, listenerPort: ctx.port, event }) + '\n'),
+    sink: (event, ctx) => {
+      buffer.push(event, ctx);
+      out.write(JSON.stringify({ episodeId: ctx.episodeId, listenerPort: ctx.port, event }) + '\n');
+    },
     onError: (err, where) => process.stderr.write(`[mitm-proxy] ${where}: ${String(err)}\n`),
   });
   for (const l of listeners) {
@@ -48,8 +50,17 @@ async function main(): Promise<void> {
       `[mitm-proxy] ${l.spec.episodeId}/${l.spec.role} (${l.purpose}) listening on ${l.url}\n`,
     );
   }
+  const control = config.control
+    ? await startProxyControl(proxy, {
+        host: config.control.host,
+        port: config.control.port,
+        token: readSecretFile(config.control.tokenFile),
+        buffer,
+      })
+    : null;
+  if (control) process.stderr.write(`[mitm-proxy] control endpoint on ${control.url}\n`);
   const stop = () => {
-    void proxy.close().then(() => process.exit(0));
+    void Promise.all([proxy.close(), control?.close()]).then(() => process.exit(0));
   };
   process.once('SIGTERM', stop);
   process.once('SIGINT', stop);

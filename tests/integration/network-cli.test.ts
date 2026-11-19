@@ -10,8 +10,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PROBE_HOST, TRUSTED_HEADERS } from '../../packages/protocol/src/index.js';
-import { ensureTrustMaterial, trustEnv, type EvalCa } from '../../packages/pki/src/index.js';
+import { PROBE_HOST, TRUSTED_HEADERS } from '@aab/protocol';
+import { ensureTrustMaterial, trustEnv, type EvalCa } from '@aab/pki';
 import {
   AGENT_CLI_QUIET_ENV,
   MitmProxy,
@@ -19,7 +19,7 @@ import {
   createEventCollector,
   type BoundListener,
   type EventCollector,
-} from '../../packages/mitm-proxy/src/index.js';
+} from '@aab/mitm-proxy';
 
 let tmp: string;
 let ca: EvalCa;

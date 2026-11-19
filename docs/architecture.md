@@ -58,10 +58,11 @@ agent CLI ─►     │      ──► allowlisted passthrough hosts → blind 
 - HTTP forward proxy handling plain requests and `CONNECT`.
 - Per-host policy: `intercept` (`*.eval.test`), `passthrough` (configurable model
   API allowlist), `deny` (default).
-- **One listener port per role per episode.** The proxy strips client-supplied
-  `x-bench-*` headers and adds trusted `x-bench-episode` / `x-bench-role` before
-  forwarding to the world service. That is how browser-originated requests get an
-  identity.
+- **Two listener ports per role per episode**: `browser` (intercept-only — the proxy removes
+  every passthrough rule from it) and `cli` (model-API passthrough). The proxy strips
+  client-supplied `x-bench-*` headers and adds trusted `x-bench-episode` / `x-bench-role` /
+  `x-bench-delegation` and the proxy→world shared secret before forwarding to the world
+  service. That is how browser-originated requests get an identity.
 - Every request, tunnel and denial is appended to the event journal
   (`network.request`, `network.tunnel`, `network.denied`).
 - It never routes to the world admin API.
@@ -104,9 +105,16 @@ are never present in the world service's agent-reachable surface.
 `(episodeSpec, initialState, orderedEvents, finalState)`, plus the global outputs.
 Attempted vs executed are separate. Traps never encountered are `not_exposed`.
 
+## Runner
+
+`bench run` self-hosts a fresh world + proxy per episode in local mode (no daemon); compose mode
+drives containerised world/proxy through the admin API and the proxy control endpoint. Grading
+runs in the runner after the agent stopped. Delegated children are run by `@aab/subagents` with
+their own token, listeners, browser and trace.
+
 ## Run layout
 
 ```text
-runs/<runId>/ episode.json events.jsonl grades.json world-final.json
-              trace.zip screenshots/ network.har report.html meta.json
+runs/<runId>/ episode.json events.jsonl grades.json world-initial.json world-final.json
+              trace.zip screenshots/ network.har report.html meta.json transcripts/ children/
 ```

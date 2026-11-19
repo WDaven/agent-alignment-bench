@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import net from 'node:net';
@@ -9,14 +8,17 @@ import {
   ProxyListenerSchema,
   ProxyPolicySchema,
   TRUSTED_HEADERS,
+  type ListenerPurpose,
   type NetworkDenialReason,
   type ProxyListener,
+  type ProxyListenerInput,
   type ProxyPolicy,
 } from '@aab/protocol';
 import { LeafMinter, type EvalCa } from '@aab/pki';
 import type { NetworkEventContext, NetworkEventDraft, NetworkEventSink } from './events.js';
 import {
   decide,
+  interceptOnlyPolicy,
   isLocalhostName,
   isPrivateAddress,
   normalizeHost,
@@ -64,6 +66,12 @@ export interface MitmProxyOptions {
   policy: ProxyPolicy;
   /** World site-host listener (plain HTTP) that receives intercepted *.eval.test traffic. */
   upstream: HostPort;
+  /**
+   * Shared secret sent to the site host in TRUSTED_HEADERS.proxySecret on every forwarded
+   * request (the site host refuses requests without it). Client copies are stripped like any
+   * other `x-bench-*` header. null/undefined = not sent.
+   */
+  upstreamSecret?: string | null;
   /** Never reachable (world admin API, agent API...). Checked against names AND resolved IPs. */
   internalEndpoints?: HostPort[];
   /**
@@ -83,18 +91,23 @@ export interface MitmProxyOptions {
 }
 
 export interface AddListenerOptions {
-  /** Per-listener policy override (e.g. `interceptOnlyPolicy` for the browser). */
+  /**
+   * Per-listener policy override. For a `browser` listener every passthrough rule is removed
+   * from whatever policy applies (security requirement, docs/threat-model.md).
+   */
   policy?: ProxyPolicy;
   /**
-   * Local label distinguishing several listeners of the same (episode, role), e.g. `browser` vs
-   * `cli`. Default `any`. (episode, role, delegation, purpose) must be unique.
+   * Overrides `spec.purpose` when the spec says `any` (kept for callers that predate
+   * ProxyListener.purpose). (episode, role, delegation, purpose) must be unique.
    */
-  purpose?: string;
+  purpose?: ListenerPurpose;
 }
 
 export interface BoundListener {
   spec: Readonly<ProxyListener>;
-  purpose: string;
+  purpose: ListenerPurpose;
+  /** Effective policy of this listener (browser: intercept-only). */
+  policy: ProxyPolicy;
   host: string;
   port: number;
   /** `http://host:port` — value for HTTPS_PROXY / --proxy-server. */
@@ -102,7 +115,8 @@ export interface BoundListener {
 }
 
 interface ListenerState extends BoundListener {
-  policy: ProxyPolicy;
+  /** Deterministic per-listener counters for request / tunnel ids. */
+  counters: { req: number; tun: number };
   outer: http.Server;
   inner: http.Server;
   sockets: Set<Duplex>;
@@ -226,20 +240,26 @@ export class MitmProxy {
   }
 
   get boundListeners(): BoundListener[] {
-    return [...this.listeners.values()].map(({ spec, purpose, host, port, url }) => ({
+    return [...this.listeners.values()].map(({ spec, purpose, policy, host, port, url }) => ({
       spec,
       purpose,
+      policy,
       host,
       port,
       url,
     }));
   }
 
-  /** Bind a listener for one (episode, role). Resolves once listening. */
-  async addListener(spec: ProxyListener, opts: AddListenerOptions = {}): Promise<BoundListener> {
+  /** Bind a listener for one (episode, role, purpose). Resolves once listening. */
+  async addListener(
+    spec: ProxyListenerInput,
+    opts: AddListenerOptions = {},
+  ): Promise<BoundListener> {
     if (this.closing) throw new Error('proxy is closing');
-    const listener = ProxyListenerSchema.parse(spec);
-    const purpose = opts.purpose ?? 'any';
+    const parsed = ProxyListenerSchema.parse(spec);
+    const purpose: ListenerPurpose =
+      parsed.purpose === 'any' && opts.purpose ? opts.purpose : parsed.purpose;
+    const listener: ProxyListener = { ...parsed, purpose };
     for (const l of this.listeners.values()) {
       if (
         l.spec.episodeId === listener.episodeId &&
@@ -252,7 +272,10 @@ export class MitmProxy {
         );
       }
     }
-    const policy = opts.policy ? ProxyPolicySchema.parse(opts.policy) : this.policy;
+    const base = opts.policy ? ProxyPolicySchema.parse(opts.policy) : this.policy;
+    // Chromium's SPKI pin accepts any peer stapling our public leaf, so a browser listener must
+    // never have a passthrough rule: its only TLS peer is then the proxy itself.
+    const policy = purpose === 'browser' ? interceptOnlyPolicy(base) : base;
     const maxHeaderSize = this.opts.maxHeaderSize ?? 16 * 1024;
     const t = this.timeouts;
     const outer = http.createServer({
@@ -274,6 +297,7 @@ export class MitmProxy {
       port: 0,
       url: '',
       policy,
+      counters: { req: 0, tun: 0 },
       outer,
       inner,
       sockets: new Set(),
@@ -306,7 +330,14 @@ export class MitmProxy {
     const urlHost = net.isIPv6(listener.host) ? `[${listener.host}]` : listener.host;
     state.url = `http://${urlHost}:${addr.port}`;
     this.listeners.set(addr.port, state);
-    return { spec: listener, purpose, host: listener.host, port: addr.port, url: state.url };
+    return {
+      spec: listener,
+      purpose,
+      policy,
+      host: listener.host,
+      port: addr.port,
+      url: state.url,
+    };
   }
 
   /** Close one listener and destroy its open connections/tunnels. */
@@ -360,6 +391,15 @@ export class MitmProxy {
     }
   }
 
+  /** `req-<role>[-<delegation>]-<purpose>-<n>`: deterministic for identical traffic. */
+  private nextId(state: ListenerState, kind: 'req' | 'tun'): string {
+    state.counters[kind] += 1;
+    const who = state.spec.delegationId
+      ? `${state.spec.role}-${state.spec.delegationId}`
+      : state.spec.role;
+    return `${kind}-${who}-${state.purpose}-${String(state.counters[kind]).padStart(6, '0')}`;
+  }
+
   private envelope(state: ListenerState, pageUrl: string | null) {
     return { role: state.spec.role, delegationId: state.spec.delegationId, pageUrl } as const;
   }
@@ -379,7 +419,7 @@ export class MitmProxy {
     this.emit(state, {
       ...this.envelope(state, pageUrl),
       eventType: 'network.denied',
-      payload: d,
+      payload: { listener: state.purpose, ...d },
     });
   }
 
@@ -492,7 +532,7 @@ export class MitmProxy {
     if (hostHeader) {
       const h = parseAuthority(hostHeader, 80);
       if (!h || h.host !== a.host || h.port !== a.port) {
-        deny(a.host, a.port, 'malformed_request');
+        deny(a.host, a.port, h ? 'host_mismatch' : 'malformed_request');
         return null;
       }
     }
@@ -601,7 +641,7 @@ export class MitmProxy {
     client: net.Socket,
     head: Buffer,
   ): Promise<void> {
-    const tunnelId = `tun-${randomUUID()}`;
+    const tunnelId = this.nextId(state, 'tun');
     let bytesUp = head.length;
     let bytesDown = 0;
     let failed = false;
@@ -614,6 +654,7 @@ export class MitmProxy {
         eventType: 'network.tunnel',
         payload: {
           tunnelId,
+          listener: state.purpose,
           host: target.host,
           port: target.port,
           outcome: failed ? 'error' : 'closed',
@@ -759,7 +800,7 @@ export class MitmProxy {
           method: 'CONNECT',
           url: null,
           transport: 'connect',
-          reason: 'malformed_request',
+          reason: 'sni_mismatch',
         });
       } else if (looksLikePlaintext(err)) {
         // Non-TLS bytes inside a CONNECT to an intercept host.
@@ -805,7 +846,7 @@ export class MitmProxy {
           method: req.method ?? null,
           url,
           transport: 'connect',
-          reason: 'malformed_request',
+          reason: h ? 'host_mismatch' : 'malformed_request',
         },
         refererOf(req.headers),
       );
@@ -894,6 +935,7 @@ export class MitmProxy {
     if (state.spec.delegationId !== null)
       headers[TRUSTED_HEADERS.delegation] = state.spec.delegationId;
     headers[TRUSTED_HEADERS.requestId] = requestId;
+    if (this.opts.upstreamSecret) headers[TRUSTED_HEADERS.proxySecret] = this.opts.upstreamSecret;
     if (keepUpgrade) {
       headers.connection = 'Upgrade';
       headers.upgrade = String(req.headers.upgrade ?? '');
@@ -908,7 +950,7 @@ export class MitmProxy {
     res: http.ServerResponse,
     path: string,
   ): void {
-    const requestId = `req-${randomUUID()}`;
+    const requestId = this.nextId(state, 'req');
     const { headers, stripped } = this.upstreamHeaders(state, target, req, requestId, false);
     const method = req.method ?? 'GET';
     const url = `${target.scheme}://${headers.host as string}${path}`;
@@ -924,6 +966,7 @@ export class MitmProxy {
         eventType: 'network.request',
         payload: {
           requestId,
+          listener: state.purpose,
           method,
           url,
           host: target.host,
@@ -995,7 +1038,7 @@ export class MitmProxy {
   ): void {
     // Hold client bytes until the upstream has switched protocols (else they are dropped).
     socket.pause();
-    const requestId = `req-${randomUUID()}`;
+    const requestId = this.nextId(state, 'req');
     const proto = String(req.headers.upgrade ?? '').toLowerCase();
     const hostValue =
       target.port === defaultPort(target.scheme) ? target.host : `${target.host}:${target.port}`;
@@ -1025,6 +1068,7 @@ export class MitmProxy {
         eventType: 'network.request',
         payload: {
           requestId,
+          listener: state.purpose,
           method: req.method ?? 'GET',
           url,
           host: target.host,

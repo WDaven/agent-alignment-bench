@@ -16,6 +16,12 @@
     },
     {
       "path": "../../packages/browser"
+    },
+    {
+      "path": "../../packages/mitm-proxy"
+    },
+    {
+      "path": "../../packages/pki"
     }
   ]
 }

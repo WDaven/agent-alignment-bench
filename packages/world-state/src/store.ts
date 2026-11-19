@@ -88,6 +88,7 @@ export class WorldStore {
   private readonly cache: RunEvent[] = [];
   private readonly lines: string[] = [];
   private readonly knownHosts: Set<string>;
+  private readonly listeners = new Set<(e: RunEvent) => void>();
 
   private constructor(
     spec: ScenarioSpec,
@@ -236,6 +237,13 @@ export class WorldStore {
     this.cache.push(event);
     this.lines.push(json);
     this.projection = next;
+    for (const l of this.listeners) {
+      try {
+        l(event);
+      } catch {
+        /* listeners must not break the journal */
+      }
+    }
     return event;
   }
 
@@ -248,13 +256,65 @@ export class WorldStore {
    * `action.attempted` BEFORE validation or any policy decision; then the domain events and
    * exactly one `action.committed` / `action.denied` follow. Denials are return values.
    *
-   * Throws UnknownActionError (nothing journaled) if `action` is not in the catalogue: the
-   * protocol's `action.attempted` payload cannot represent an unknown action name.
+   * Throws UnknownActionError (nothing journaled) if `action` is not in the catalogue; callers
+   * that want such calls journaled use `executeUnknown` (an `action.unknown` event).
    */
   execute(ctx: ExecuteContext, action: string, rawRequest: unknown): WorldOpResponse<ActionName> {
     const parsedAction = ActionNameSchema.safeParse(action);
     if (!parsedAction.success) throw new UnknownActionError(`unknown action ${action}`);
-    const a = parsedAction.data;
+    return this.executeKnown(ctx, parsedAction.data, rawRequest);
+  }
+
+  /**
+   * Journal a call to an operation that is not in the catalogue as one `action.unknown` event
+   * (attempt + `unknown_action` denial). Nothing else changes. Returns the denial response.
+   */
+  executeUnknown(
+    ctx: ExecuteContext,
+    requestedAction: string,
+    rawRequest: unknown,
+  ): {
+    ok: false;
+    action: string;
+    attemptId: string;
+    denial: { reason: 'unknown_action'; message: string };
+  } {
+    if (!this.episodeActive) throw new IngestError('episode has ended');
+    const name = String(requestedAction).slice(0, 128);
+    const attemptId = `${attemptIdFor(this.projection.world.attempts.length + 1)}-u${this.projection.world.lifecycle.unknownActionAttempts + 1}`;
+    this.append({
+      role: ctx.role as Role,
+      delegationId: ctx.delegationId ?? null,
+      pageUrl: ctx.pageUrl ?? null,
+      eventType: 'action.unknown',
+      payload: {
+        attemptId,
+        requestedAction: name,
+        request: rawRequest === undefined ? {} : rawRequest,
+        via: ctx.via,
+        toolCallId: ctx.toolCallId ?? null,
+        reason: 'unknown_action',
+      },
+    });
+    return {
+      ok: false,
+      action: name,
+      attemptId,
+      denial: { reason: 'unknown_action', message: `there is no world operation named ${name}` },
+    };
+  }
+
+  /** Subscribe to every appended event (synchronous, after it is persisted). Returns unsubscribe. */
+  onEvent(listener: (e: RunEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private executeKnown(
+    ctx: ExecuteContext,
+    a: ActionName,
+    rawRequest: unknown,
+  ): WorldOpResponse<ActionName> {
     const envelope = {
       role: ctx.role as Role,
       delegationId: ctx.delegationId ?? null,

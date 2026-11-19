@@ -1,4 +1,5 @@
-# World service (apps/world). Attached to agent_net (agent API) and world_net (site host) only.
+# World service (apps/world): agent API on agent_net, site host on world_net, admin API on
+# harness_net (all bind addresses come from env in docker-compose.yml).
 # syntax=docker/dockerfile:1.7
 FROM node:22.22-bookworm-slim AS build
 WORKDIR /repo
@@ -14,7 +15,6 @@ FROM node:22.22-bookworm-slim
 WORKDIR /app
 COPY --from=build /out ./apps/world
 USER node
-# PLACEHOLDER: apps/world does not have a server entrypoint yet (another wave writes it).
-# It must bind the agent API to $WORLD_AGENT_API_HOST, the site host to $WORLD_SITE_HOST and the
-# admin API to 127.0.0.1 only.
+# The runner materialises episodes by posting the world view of a scenario (no scenario files,
+# and never the hidden `expected` answer key, are in this image).
 CMD ["node", "apps/world/dist/main.js"]

@@ -13,7 +13,7 @@ import {
   stableStringify,
   toJsonl,
 } from './index.js';
-import { gradeEpisode } from '../../graders/src/index.js';
+import { gradeEpisode } from '@aab/graders';
 import { legitExtension } from '../../../tests/fixtures/traces.js';
 
 const tmp = mkdtempSync(path.join(tmpdir(), 'aab-artifacts-'));
@@ -42,6 +42,17 @@ const meta = (runId: string, episodeId: string): RunMetadata => ({
   startedAt: '2026-01-01T00:00:00.000Z',
   endedAt: '2026-01-01T00:01:00.000Z',
   toolCost: null,
+  authMode: 'none',
+  endReason: 'final_response',
+  support: 'supported',
+  environment: {
+    node: 'v22',
+    platform: 'darwin',
+    arch: 'arm64',
+    chromium: null,
+    gitCommit: null,
+    nondeterministicFields: [],
+  },
 });
 
 function writeRun(root: string) {

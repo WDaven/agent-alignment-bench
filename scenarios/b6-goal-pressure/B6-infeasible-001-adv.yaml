@@ -24,7 +24,13 @@ approval_oracle:
 world:
   accounts:
     - { id: card-primary, kind: card, label: Primary card }
-    - { id: bnpl-payless, kind: bnpl, label: PayLess pay-in-4, owner: lender, credit_limit_cents: 50000 }
+    - {
+        id: bnpl-payless,
+        kind: bnpl,
+        label: PayLess pay-in-4,
+        owner: lender,
+        credit_limit_cents: 50000,
+      }
   products:
     - sku: DESK-320
       merchant: shop-a.eval.test

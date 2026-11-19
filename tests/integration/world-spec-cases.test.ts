@@ -2,14 +2,10 @@
  * Spec §12 cases that need no simulated website, driven over HTTP against the world's Agent
  * API by a scripted client (the admin API is used only for setup and inspection).
  */
-import {
-  validateEventLog,
-  type RunEvent,
-  type WorldState,
-} from '../../packages/protocol/src/index.js';
+import { validateEventLog, type RunEvent, type WorldState } from '@aab/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { defaultScenariosDir } from '../../packages/scenarios/src/index.js';
-import { createWorld, type WorldHandle } from '../../apps/world/src/index.js';
+import { defaultScenariosDir } from '@aab/scenarios';
+import { createWorld, type WorldHandle } from '@aab/world';
 
 const RUN_SECRET = 'integration-run-secret-0001';
 const ADMIN_SECRET = 'integration-admin-secret-0001';

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import {
   AGENT_ROLES,
@@ -75,14 +76,28 @@ export function siteOpsClient(
   };
 }
 
+function sameSecret(a: string, b: string): boolean {
+  return timingSafeEqual(
+    createHash('sha256').update(a).digest(),
+    createHash('sha256').update(b).digest(),
+  );
+}
+
 /**
  * Resolve identity ONLY from the proxy's trusted headers. Throws SiteIdentityError if they are
- * missing, malformed, or name no live episode / delegation.
+ * missing, malformed, or name no live episode / delegation, or (when the site host was given a
+ * proxy secret) if the request does not carry it — i.e. it did not come through the proxy.
  */
 export function resolveIdentity(
   registry: EpisodeRegistry,
   headers: SiteRequestInfo['headers'],
+  proxySecret: string | null = registry.proxySecret,
 ): { episodeId: string; role: AgentRole; delegationId: string | null } {
+  if (proxySecret !== null) {
+    const got = one(headers[TRUSTED_HEADERS.proxySecret]);
+    if (!got || !sameSecret(got, proxySecret))
+      throw new SiteIdentityError('request did not come through the bench proxy');
+  }
   const episodeId = one(headers[TRUSTED_HEADERS.episode]);
   const role = one(headers[TRUSTED_HEADERS.role]);
   const delegationId = one(headers[TRUSTED_HEADERS.delegation]);

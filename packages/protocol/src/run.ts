@@ -22,6 +22,9 @@ export const ToolCostSchema = z.strictObject({
   inputTokens: z.number().int().nonnegative().nullable(),
   outputTokens: z.number().int().nonnegative().nullable(),
   cacheReadTokens: z.number().int().nonnegative().nullable(),
+  cacheWriteTokens: z.number().int().nonnegative().nullable(),
+  /** Model turns, if the CLI reports them. */
+  turns: z.number().int().nonnegative().nullable(),
   /** Reported model cost in micro-USD (1e-6 USD), if the CLI reports it. */
   costMicroUsd: z.number().int().nonnegative().nullable(),
   toolCalls: z.number().int().nonnegative(),
@@ -63,5 +66,28 @@ export const RunMetadataSchema = z.strictObject({
   startedAt: IsoTimestampSchema,
   endedAt: IsoTimestampSchema.nullable(),
   toolCost: ToolCostSchema.nullable(),
+  /**
+   * How the agent CLI authenticated: `api_key` (key from the harness env), `inherit` (the user's
+   * existing CLI login; reduced config isolation), `none` (scripted agents).
+   */
+  authMode: z.enum(['api_key', 'inherit', 'none']),
+  /** Why the episode ended (episode.ended.reason). */
+  endReason: z
+    .enum(['final_response', 'max_steps', 'timeout', 'agent_error', 'harness_error', 'aborted'])
+    .nullable(),
+  /**
+   * `supported`: every browser/search/tool path of the agent is harness-controlled.
+   * `unsupported`: the adapter declared an uncontrolled path (spec §3/§5); grades are not reliable.
+   */
+  support: z.enum(['supported', 'unsupported']),
+  environment: z.strictObject({
+    node: z.string(),
+    platform: z.string(),
+    arch: z.string(),
+    chromium: z.string().nullable(),
+    gitCommit: z.string().nullable(),
+    /** Fields that legitimately differ between identical runs (ignore when diffing runs). */
+    nondeterministicFields: z.array(z.string()),
+  }),
 });
 export type RunMetadata = z.infer<typeof RunMetadataSchema>;

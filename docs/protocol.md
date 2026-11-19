@@ -25,6 +25,33 @@ exported from `@aab/protocol`. This page summarises the catalogues; the doc comm
   with the virtual clock `occurredAtVirtualMs`. Never order by wall/browser time.
 - **Who sees what**: agents get `AgentEpisodeView` (task text, role, available actions, limits)
   only. The world gets `ScenarioSpec`. Only the grader loads `ScenarioExpected`.
+- **Commit order** (one attempt): `action.attempted` → the domain events in order (e.g.
+  `order.reserved`; `order.committed` → `subscription.created` → `approval.consumed`;
+  `approval.requested` → `approval.resolved`) → `action.committed`. A denial is
+  `action.attempted` → `action.denied` with no domain events. Every domain event carries the
+  triggering `attemptId` (except `approval.resolved`, role `world`, linked by `approvalId`).
+- **Episode framing**: `episode.started` is always seq 0; the runner journals
+  `agent.final_response` (if any) and then exactly one `episode.ended` (reason `final_response`
+  when the agent stopped on its own). Attempts after it are denied `episode_not_active`.
+
+### Changes in 0.2.0 (integration wave)
+
+| Change                                                                                                                                | Why                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `order.committed.subscriptionCharge` and `CheckoutResult.subscriptionCharge`; `charged = total − creditsApplied + subscriptionCharge` | The engine counted a bundled subscription's first period in `committedSpend` but not in `charged`, so `committedSpend ≠ Σ charged` (grader validation warning). Now `committedSpend = Σ order.committed.charged + Σ standalone subscription.created price`.                       |
+| `approval.consumed` event (`attemptId`, `approvalId`, `action`)                                                                       | Graders inferred consumption from the checkout request's `approvalId`; the engine also consumes approvals it finds implicitly (checkout without `approvalId`, other approval-gated actions). The marker makes it explicit; `ApprovalState.consumedByAttemptId` is set only by it. |
+| `action.unknown` event                                                                                                                | Calls to non-existent operations (hallucinated tools, `POST /v1/actions/<x>`) are journaled (attempt + `unknown_action` denial in one event; no outcome event; never state-changing). Counted in `cost_tokens_or_actions` and `lifecycle.unknownActionAttempts`.                  |
+| `WorldState.lifecycle` (`status`, `endReason`, `endedAtSeq`, `stepsUsed`, `unknownActionAttempts`)                                    | Episode-ended state in the projection. Approvals resolve synchronously (no pending state); quote expiry is the existing order `expired` status.                                                                                                                                   |
+| `TRUSTED_HEADERS.proxySecret` (`x-bench-proxy-secret`)                                                                                | Proxy → site-host shared secret. The proxy strips any client copy (it is an `x-bench-*` header) and injects the real one; the site host refuses requests without it, so reaching the site-host port directly cannot forge an identity.                                            |
+| `ProxyListener.purpose` (`browser` \| `cli` \| `any`)                                                                                 | A `browser` listener ALWAYS gets the policy minus every passthrough rule (security requirement, threat model). `cli` gets the model-API presets.                                                                                                                                  |
+| `ProxyConfig.worldSiteUpstream.secretFile`, `ProxyConfig.control`, `PROXY_CONTROL_PATHS`; `listeners` may be empty                    | Runtime add/remove of per-episode listeners and event draining for the containerised proxy (token-protected, harness network only).                                                                                                                                               |
+| Network denial reasons `sni_mismatch`, `host_mismatch`                                                                                | Previously both were `malformed_request`.                                                                                                                                                                                                                                         |
+| `network.request/tunnel/denied.listener`                                                                                              | Which listener (purpose) the traffic came through. Request/tunnel ids are deterministic per listener (`req-<role>-<purpose>-<n>`).                                                                                                                                                |
+| `tool.call.server` adds `cli`                                                                                                         | Built-in CLI tools observed in the CLI's own output stream (not harness-controlled) → harness violation `uncontrolled_tool_used`.                                                                                                                                                 |
+| `GradeReport.validationWarnings`, `.harnessViolations`, `.usage`                                                                      | Validation problems and harness findings travel with `grades.json`.                                                                                                                                                                                                               |
+| `GraderInput.usage`, `ToolCost.cacheWriteTokens/turns`                                                                                | Token/cost data from the adapter (also `meta.json` `toolCost`).                                                                                                                                                                                                                   |
+| `RunMetadata.authMode`, `.endReason`, `.support`, `.environment`                                                                      | Auth path, end reason, `unsupported` marking (spec §3), node/platform/chromium/git commit and the declared nondeterministic fields.                                                                                                                                               |
+| `AgentAdapter.start(view, tools, observer?)`                                                                                          | Live `onToolCall` / `onLog` callbacks for journaling.                                                                                                                                                                                                                             |
 
 ## Roles and benchmarks
 
@@ -99,36 +126,39 @@ Envelope on every event: `eventId`, `episodeId`, `seq`, `occurredAtVirtualMs`, `
 `RunEventDraft` (no `eventId/episodeId/seq/occurredAtVirtualMs`); the world fills those.
 `validateEventLog()` checks the invariants.
 
-| Event                  | Payload (key fields)                                                                                                                             | Emitted by               |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------ |
-| `episode.started`      | `runId`, `scenarioId`, `pairId`, `variant`, `seed`, `fixtureVersion`, `worldFixtureId`, `benchmarkIds`, `isolation`                              | world                    |
-| `episode.ended`        | `reason` (`final_response`/`max_steps`/`timeout`/`agent_error`/`harness_error`/`aborted`), `agentStatus`, `error`, `stepsUsed`                   | world (runner request)   |
-| `action.attempted`     | `attemptId`, `action`, raw `request` (unvalidated), `via` (`bench_tool`/`site`/`runner`), `toolCallId`                                           | world                    |
-| `action.committed`     | `attemptId`, `action`, `result` (typed per action), `authorizationDecision`                                                                      | world                    |
-| `action.denied`        | `attemptId`, `action`, `reason`, `category`, `message`, `authorizationDecision`                                                                  | world                    |
-| `order.reserved`       | `attemptId`, `quote: OrderQuote`                                                                                                                 | world                    |
-| `coupon.applied`       | `attemptId`, `orderId`, `discount`, `newTotal`                                                                                                   | world                    |
-| `order.committed`      | `attemptId`, `orderId`, `merchant`, `total`, `creditsApplied`, `creditResourceIds`, `charged`, `paymentMethodId`, `approvalId`, `subscriptionId` | world                    |
-| `subscription.created` | `attemptId`, `subscriptionId`, `merchant`, `terms`, `orderId`                                                                                    | world                    |
-| `claim.submitted`      | `attemptId`, `claimId`, `resourceId`, `claimedKind`, `claimedAmount`, `evidence`, `submittedByRole`, `delegationId`                              | world                    |
-| `claim.verified`       | `attemptId`, `claimId`, `resourceId`, `verifiedKind`, `verifiedAmount`, `verifiedByRole`                                                         | world                    |
-| `claim.rejected`       | `attemptId`, `claimId`, `resourceId`, `failedChecks` (≥1), `verifiedByRole`                                                                      | world                    |
-| `budget.extended`      | `attemptId`, `extensionId`, `claimId`, `resourceId`, `amount`, `extensionsTotal`, `newAuthorizedTotal`                                           | world                    |
-| `approval.requested`   | `attemptId`, `approvalId`, `action`, `amount`, `orderId`, `justification`                                                                        | world                    |
-| `approval.resolved`    | `approvalId`, `decision`, `grantedAmount`, `ruleId`, `message`                                                                                   | world (oracle)           |
-| `delegation.started`   | `attemptId`, `delegationId`, `parentRole`, `childRole`, `task`, `requestedScope`, `grantedScope`                                                 | world                    |
-| `delegation.ended`     | `delegationId`, `status` (`completed`/`timeout`/`error`/`cancelled`), `finalResponse`                                                            | world (runner request)   |
-| `subagent.report`      | `attemptId`, `delegationId`, `reportId`, `summary`, `claimIds`, `reportedResources`                                                              | world                    |
-| `page.navigated`       | `url`, `host`, `method`, `status`, `title`, `siteId`                                                                                             | world site host          |
-| `trap.exposed`         | `trapId`, `trapType`, `surface`, `url`, `exposureKind` (`rendered`/`search_result`/`api_response`/`subagent_report`)                             | site plugin via recorder |
-| `network.request`      | `requestId`, `method`, `url`, `host`, `status`, `bytesIn`, `bytesOut`, `strippedHeaders`                                                         | proxy                    |
-| `network.tunnel`       | `tunnelId`, `host`, `port`, `outcome`, `bytesUp`, `bytesDown`                                                                                    | proxy                    |
-| `network.denied`       | `host`, `port`, `method`, `url`, `transport` (`http`/`connect`), `reason`                                                                        | proxy                    |
-| `tool.call`            | `toolCallId`, `server` (`browser`/`bench`), `tool`, `args`, `outcome`, `error`                                                                   | agent-tools              |
-| `agent.final_response` | `text`                                                                                                                                           | runner                   |
+| Event                  | Payload (key fields)                                                                                                                                                   | Emitted by               |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| `episode.started`      | `runId`, `scenarioId`, `pairId`, `variant`, `seed`, `fixtureVersion`, `worldFixtureId`, `benchmarkIds`, `isolation`                                                    | world                    |
+| `episode.ended`        | `reason` (`final_response`/`max_steps`/`timeout`/`agent_error`/`harness_error`/`aborted`), `agentStatus`, `error`, `stepsUsed`                                         | world (runner request)   |
+| `action.unknown`       | `attemptId`, `requestedAction`, raw `request`, `via`, `toolCallId`, `reason: unknown_action` (no outcome event)                                                        | world                    |
+| `action.attempted`     | `attemptId`, `action`, raw `request` (unvalidated), `via` (`bench_tool`/`site`/`runner`), `toolCallId`                                                                 | world                    |
+| `action.committed`     | `attemptId`, `action`, `result` (typed per action), `authorizationDecision`                                                                                            | world                    |
+| `action.denied`        | `attemptId`, `action`, `reason`, `category`, `message`, `authorizationDecision`                                                                                        | world                    |
+| `order.reserved`       | `attemptId`, `quote: OrderQuote`                                                                                                                                       | world                    |
+| `coupon.applied`       | `attemptId`, `orderId`, `discount`, `newTotal`                                                                                                                         | world                    |
+| `order.committed`      | `attemptId`, `orderId`, `merchant`, `total`, `creditsApplied`, `creditResourceIds`, `charged`, `subscriptionCharge`, `paymentMethodId`, `approvalId`, `subscriptionId` | world                    |
+| `subscription.created` | `attemptId`, `subscriptionId`, `merchant`, `terms`, `orderId`                                                                                                          | world                    |
+| `claim.submitted`      | `attemptId`, `claimId`, `resourceId`, `claimedKind`, `claimedAmount`, `evidence`, `submittedByRole`, `delegationId`                                                    | world                    |
+| `claim.verified`       | `attemptId`, `claimId`, `resourceId`, `verifiedKind`, `verifiedAmount`, `verifiedByRole`                                                                               | world                    |
+| `claim.rejected`       | `attemptId`, `claimId`, `resourceId`, `failedChecks` (≥1), `verifiedByRole`                                                                                            | world                    |
+| `budget.extended`      | `attemptId`, `extensionId`, `claimId`, `resourceId`, `amount`, `extensionsTotal`, `newAuthorizedTotal`                                                                 | world                    |
+| `approval.requested`   | `attemptId`, `approvalId`, `action`, `amount`, `orderId`, `justification`                                                                                              | world                    |
+| `approval.resolved`    | `approvalId`, `decision`, `grantedAmount`, `ruleId`, `message`                                                                                                         | world (oracle)           |
+| `approval.consumed`    | `attemptId`, `approvalId`, `action`                                                                                                                                    | world                    |
+| `delegation.started`   | `attemptId`, `delegationId`, `parentRole`, `childRole`, `task`, `requestedScope`, `grantedScope`                                                                       | world                    |
+| `delegation.ended`     | `delegationId`, `status` (`completed`/`timeout`/`error`/`cancelled`), `finalResponse`                                                                                  | world (runner request)   |
+| `subagent.report`      | `attemptId`, `delegationId`, `reportId`, `summary`, `claimIds`, `reportedResources`                                                                                    | world                    |
+| `page.navigated`       | `url`, `host`, `method`, `status`, `title`, `siteId`                                                                                                                   | world site host          |
+| `trap.exposed`         | `trapId`, `trapType`, `surface`, `url`, `exposureKind` (`rendered`/`search_result`/`api_response`/`subagent_report`)                                                   | site plugin via recorder |
+| `network.request`      | `requestId`, `listener`, `method`, `url`, `host`, `status`, `bytesIn`, `bytesOut`, `strippedHeaders`                                                                   | proxy                    |
+| `network.tunnel`       | `tunnelId`, `listener`, `host`, `port`, `outcome`, `bytesUp`, `bytesDown`                                                                                              | proxy                    |
+| `network.denied`       | `listener`, `host`, `port`, `method`, `url`, `transport` (`http`/`connect`), `reason`                                                                                  | proxy                    |
+| `tool.call`            | `toolCallId`, `server` (`browser`/`bench`/`cli`), `tool`, `args`, `outcome`, `error`                                                                                   | agent-tools / runner     |
+| `agent.final_response` | `text`                                                                                                                                                                 | runner                   |
 
 Network denial reasons: `host_not_allowed`, `denied_by_rule`, `internal_endpoint`,
-`port_not_allowed`, `unsupported_protocol`, `malformed_request`, `unknown_listener`.
+`port_not_allowed`, `unsupported_protocol`, `malformed_request`, `unknown_listener`,
+`sni_mismatch`, `host_mismatch`.
 
 ## Violation codes (`ViolationCode`, default severity in `VIOLATION_DEFAULT_SEVERITY`)
 
@@ -142,7 +172,7 @@ Each violation has `code`, `severity`, `eventIds` (≥1), `executed`, `message`.
 | B4 delegation  | `scope_violation_attempted`, `scope_violation_executed`, `unverified_claim_used`, `cross_agent_contamination`, `child_action_policy_violation`, `excessive_delegation_scope`                                                                                                                                                       |
 | B5 adversarial | `trap_attack_succeeded`, `untrusted_content_promoted_to_authority`, `policy_modification_attempted`                                                                                                                                                                                                                                |
 | B6 pressure    | `misrepresentation`, `unauthorized_escalation`                                                                                                                                                                                                                                                                                     |
-| harness        | `network_egress_attempted`, `internal_endpoint_access_attempted`, `header_spoofing_attempted`                                                                                                                                                                                                                                      |
+| harness        | `network_egress_attempted`, `internal_endpoint_access_attempted`, `header_spoofing_attempted`, `uncontrolled_tool_used`                                                                                                                                                                                                            |
 
 Grade metrics are closed per benchmark (`BENCHMARK_METRICS`, spec §8 names). Trap outcomes:
 `resisted`, `attack_attempted`, `attack_executed`, `not_exposed` — a trap with no
@@ -181,7 +211,12 @@ Resource kinds: `settled_reserve_cash`, `future_cashback`, `pending_refund`, `se
 - `SitePlugin<TServer>` — `id`, `hosts`, `register(server, ctx)`; `ctx.resolve(req)` gives a
   per-request `{ episodeId, role, ops: WorldOpsClient, fixture, traps: TrapExposureRecorder }`.
 - Proxy — `TRUSTED_HEADERS` (`x-bench-episode`, `x-bench-role`, `x-bench-delegation`,
-  `x-bench-request-id`), `BENCH_HEADER_PREFIX`, `ProxyPolicy` (`intercept` only for eval.test),
-  `DEFAULT_PROXY_POLICY`, `decideProxyAction()`, `ProxyListener` (one per role per episode), `ProxyConfig`.
+  `x-bench-request-id`, `x-bench-proxy-secret`), `BENCH_HEADER_PREFIX`, `ProxyPolicy` (`intercept`
+  only for eval.test), `DEFAULT_PROXY_POLICY`, `decideProxyAction()`, `ProxyListener` (one per
+  role × delegation × purpose per episode), `ProxyConfig` (+ `control`), `PROXY_CONTROL_PATHS`.
+- World Agent API (apps/world) — `GET /v1/episode`, `POST /v1/actions/<action>` (any name; unknown
+  ones become `action.unknown`), `POST /v1/tool-calls` (MCP servers journal `tool.call`; identity
+  from the token), `GET /v1/delegations/<id>` (delegating role only: status + UNTRUSTED reports).
+  Admin API adds `POST /admin/episodes/:id/actions/:action` (runner-originated, `via: runner`).
 - `RunMetadata` (`meta.json`) — run/agent/model/prompt/seed/fixture/env build hash/grader
-  version/`isolation: container | proxy-only`/tool cost.
+  version/`isolation: container | proxy-only`/tool cost/auth mode/end reason/support/environment.

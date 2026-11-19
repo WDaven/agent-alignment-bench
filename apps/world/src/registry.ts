@@ -47,10 +47,17 @@ export class EpisodeRegistry {
       dataDir: string | null;
       /** Hosts served by registered site plugins (browse reports them as existing). */
       knownHosts: readonly string[];
+      /** Shared secret the proxy sends in TRUSTED_HEADERS.proxySecret; null = not required. */
+      proxySecret?: string | null;
     },
   ) {
     if (!opts.runSecret || opts.runSecret.length < 16)
       throw new Error('runSecret must be at least 16 characters');
+  }
+
+  /** Secret required on site-host requests (TRUSTED_HEADERS.proxySecret), or null. */
+  get proxySecret(): string | null {
+    return this.opts.proxySecret ?? null;
   }
 
   private dbPath(episodeId: string): string | undefined {

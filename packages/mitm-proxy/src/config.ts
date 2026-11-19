@@ -1,7 +1,7 @@
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { ProxyConfigSchema, type ProxyConfig, type ProxyListener } from '@aab/protocol';
+import { ProxyConfigSchema, type ProxyConfigInput, type ProxyListener } from '@aab/protocol';
 import { caPaths, loadCa } from '@aab/pki';
-import { interceptOnlyPolicy } from './policy.js';
 import {
   MitmProxy,
   type AddListenerOptions,
@@ -11,23 +11,30 @@ import {
 
 export type FromConfigOptions = Omit<
   MitmProxyOptions,
-  'ca' | 'policy' | 'upstream' | 'internalEndpoints'
+  'ca' | 'policy' | 'upstream' | 'internalEndpoints' | 'upstreamSecret'
 > & {
-  /** Per-listener options (e.g. intercept-only policy for browser listeners). */
+  /** Per-listener options (rarely needed: purpose and policy come from the listener spec). */
   listenerOptions?: (listener: ProxyListener) => AddListenerOptions | undefined;
   /**
-   * Ports whose listeners serve a browser: they get `interceptOnlyPolicy(config.policy)` and
-   * purpose `browser` (ProxyConfig has one policy for all listeners; see threat model).
+   * Legacy: ports whose listeners serve a browser (purpose `browser` → intercept-only policy).
+   * Prefer `purpose: 'browser'` on the listener in the config file.
    */
   interceptOnlyPorts?: readonly number[];
 };
+
+/** Read a secret file (trimmed). Throws if missing or shorter than 16 characters. */
+export function readSecretFile(file: string): string {
+  const v = readFileSync(file, 'utf8').trim();
+  if (v.length < 16) throw new Error(`secret in ${file} must be at least 16 characters`);
+  return v;
+}
 
 /**
  * Start a proxy from the protocol's `ProxyConfig`. `config.ca` must point at a PKI dir created by
  * `@aab/pki` (`ca.pem` / `ca-key.pem`; the shared leaf key is read from the same dir).
  */
 export async function startMitmProxyFromConfig(
-  config: ProxyConfig,
+  config: ProxyConfigInput,
   opts: FromConfigOptions,
 ): Promise<{ proxy: MitmProxy; listeners: BoundListener[] }> {
   const cfg = ProxyConfigSchema.parse(config);
@@ -38,11 +45,13 @@ export async function startMitmProxyFromConfig(
   }
   const ca = await loadCa(dir);
   const { listenerOptions, interceptOnlyPorts, ...proxyOpts } = opts;
+  const { secretFile, ...upstream } = cfg.worldSiteUpstream;
   const proxy = new MitmProxy({
     ...proxyOpts,
     ca,
     policy: cfg.policy,
-    upstream: cfg.worldSiteUpstream,
+    upstream,
+    upstreamSecret: secretFile ? readSecretFile(secretFile) : null,
     internalEndpoints: cfg.internalEndpoints,
   });
   const listeners: BoundListener[] = [];
@@ -50,9 +59,7 @@ export async function startMitmProxyFromConfig(
     for (const l of cfg.listeners) {
       const extra =
         listenerOptions?.(l) ??
-        (interceptOnlyPorts?.includes(l.port)
-          ? { policy: interceptOnlyPolicy(cfg.policy), purpose: 'browser' }
-          : undefined);
+        (interceptOnlyPorts?.includes(l.port) ? { purpose: 'browser' as const } : undefined);
       listeners.push(await proxy.addListener(l, extra));
     }
   } catch (e) {

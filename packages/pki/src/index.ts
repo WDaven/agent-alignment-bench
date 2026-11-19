@@ -7,6 +7,7 @@ export {
   caPaths,
   caPemPath,
   ensureCa,
+  hasEvalNameConstraint,
   loadCa,
   rotateCa,
   type CaPaths,

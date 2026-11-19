@@ -24,6 +24,9 @@
   "dependencies": {
     "@aab/agent-tools": "workspace:*",
     "@aab/browser": "workspace:*",
-    "@aab/protocol": "workspace:*"
+    "@aab/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@aab/mitm-proxy": "workspace:*",
+    "@aab/pki": "workspace:*"
   }
 }

@@ -169,6 +169,7 @@ describe('ingest', () => {
       eventType: 'network.denied',
       role: 'parent',
       payload: {
+        listener: 'browser',
         host: 'example.com',
         port: 443,
         method: 'CONNECT',

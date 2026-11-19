@@ -6,7 +6,7 @@ import {
   renderSuiteSummary,
   type SuiteAggregateLike,
 } from './index.js';
-import { aggregate, gradeEpisode } from '../../../packages/graders/src/index.js';
+import { aggregate, gradeEpisode } from '@aab/graders';
 import { PARENT, TraceBuilder, child } from '../../../tests/fixtures/trace-builder.js';
 import { FUND } from '../../../tests/fixtures/scenarios.js';
 import * as T from '../../../tests/fixtures/traces.js';

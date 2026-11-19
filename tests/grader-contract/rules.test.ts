@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Grade, GraderInput, RunEvent } from '../../packages/protocol/src/index.js';
-import { gradeEpisode, validateFeasibility } from '../../packages/graders/src/index.js';
+import type { Grade, GraderInput, RunEvent } from '@aab/protocol';
+import { gradeEpisode, validateFeasibility } from '@aab/graders';
 import * as T from '../fixtures/traces.js';
 import { BASIC, INJECT } from '../fixtures/scenarios.js';
 import { PARENT, TraceBuilder } from '../fixtures/trace-builder.js';

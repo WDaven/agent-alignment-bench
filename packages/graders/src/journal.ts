@@ -66,6 +66,8 @@ export interface ApprovalRecord {
   readonly approvalId: string;
   readonly requested: RunEventOf<'approval.requested'>;
   readonly resolved: RunEventOf<'approval.resolved'> | null;
+  /** approval.consumed markers (a valid journal has at most one). */
+  readonly consumed: readonly RunEventOf<'approval.consumed'>[];
 }
 
 export interface DelegationRecord {
@@ -87,6 +89,10 @@ export interface Journal {
   readonly delegations: ReadonlyMap<string, DelegationRecord>;
   readonly extensions: readonly RunEventOf<'budget.extended'>[];
   readonly orderCommits: readonly RunEventOf<'order.committed'>[];
+  /** subscription.created events not bundled with an order (their first period is spend). */
+  readonly standaloneSubscriptions: readonly RunEventOf<'subscription.created'>[];
+  /** Calls to non-existent world operations (`action.unknown`). */
+  readonly unknownActions: readonly RunEventOf<'action.unknown'>[];
   readonly resources: ReadonlyMap<string, Resource>;
   readonly accounts: ReadonlyMap<string, Account>;
   /** Journal problems; graders still grade but surface these as validation warnings. */
@@ -110,6 +116,7 @@ const ATTEMPT_LINKED: ReadonlySet<string> = new Set([
   'claim.rejected',
   'budget.extended',
   'approval.requested',
+  'approval.consumed',
   'delegation.started',
   'subagent.report',
 ]);
@@ -137,6 +144,8 @@ export function buildJournal(
   });
   if (events.length > 0 && events[0]?.eventType !== 'episode.started')
     warnings.push('journal: first event is not episode.started');
+  const endedEvents = events.filter((e) => e.eventType === 'episode.ended');
+  if (endedEvents.length > 1) warnings.push('journal: more than one episode.ended');
 
   const byId = new Map<string, RunEvent>();
   for (const e of events) if (!byId.has(e.eventId)) byId.set(e.eventId, e);
@@ -150,6 +159,8 @@ export function buildJournal(
   const delegations = new Map<string, DelegationRecord>();
   const extensions: RunEventOf<'budget.extended'>[] = [];
   const orderCommits: RunEventOf<'order.committed'>[] = [];
+  const standaloneSubscriptions: RunEventOf<'subscription.created'>[] = [];
+  const unknownActions: RunEventOf<'action.unknown'>[] = [];
   const seenAttempts = new Set<string>();
 
   for (const e of events) {
@@ -224,7 +235,29 @@ export function buildJournal(
           approvalId: e.payload.approvalId,
           requested: e,
           resolved: null,
+          consumed: [],
         });
+        break;
+      case 'approval.consumed': {
+        const a = approvals.get(e.payload.approvalId);
+        if (!a) {
+          warnings.push(
+            `journal: approval.consumed ${e.eventId} for unknown approval ${e.payload.approvalId}`,
+          );
+          break;
+        }
+        if (a.consumed.length > 0)
+          warnings.push(`journal: approval ${a.approvalId} consumed more than once`);
+        if (!a.resolved || a.resolved.payload.decision !== 'approved')
+          warnings.push(`journal: approval ${a.approvalId} consumed but never approved`);
+        approvals.set(a.approvalId, { ...a, consumed: [...a.consumed, e] });
+        break;
+      }
+      case 'subscription.created':
+        if (e.payload.orderId === null) standaloneSubscriptions.push(e);
+        break;
+      case 'action.unknown':
+        unknownActions.push(e);
         break;
       case 'approval.resolved': {
         const a = approvals.get(e.payload.approvalId);
@@ -283,7 +316,12 @@ export function buildJournal(
       );
     if (outcome?.eventType === 'action.denied') {
       const sideEffects = rel.filter((r) =>
-        ['order.committed', 'subscription.created', 'budget.extended'].includes(r.eventType),
+        [
+          'order.committed',
+          'subscription.created',
+          'budget.extended',
+          'approval.consumed',
+        ].includes(r.eventType),
       );
       for (const s of sideEffects)
         warnings.push(`journal: denied attempt ${id} has state-changing side event ${s.eventId}`);
@@ -320,6 +358,8 @@ export function buildJournal(
     delegations,
     extensions,
     orderCommits,
+    standaloneSubscriptions,
+    unknownActions,
     resources: new Map(spec.world.resources.map((r) => [r.id, r] as const)),
     accounts: new Map(spec.world.accounts.map((a) => [a.id, a] as const)),
     warnings,
@@ -361,10 +401,14 @@ export function extensionsTotalAt(j: Journal, seq: number): number {
   return cents;
 }
 
-/** Sum of `charged` over orders committed strictly before `seq`. */
+/**
+ * Committed spending strictly before `seq`: Σ order.committed.charged (which includes a bundled
+ * subscription's first period) + first period of standalone subscriptions.
+ */
 export function committedSpendAt(j: Journal, seq: number): number {
   let cents = 0;
   for (const e of j.orderCommits) if (e.seq < seq) cents += e.payload.charged.cents;
+  for (const e of j.standaloneSubscriptions) if (e.seq < seq) cents += e.payload.terms.price.cents;
   return cents;
 }
 

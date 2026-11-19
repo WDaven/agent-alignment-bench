@@ -1,4 +1,5 @@
-# MITM proxy (packages/mitm-proxy). Dual-homed in docker-compose.yml: agent_net + world_net + egress.
+# MITM proxy (packages/mitm-proxy). On agent_net (listeners), world_net (site-host upstream),
+# harness_net (control endpoint) and egress (model-API passthrough only).
 # syntax=docker/dockerfile:1.7
 FROM node:22.22-bookworm-slim AS build
 WORKDIR /repo
@@ -15,6 +16,5 @@ WORKDIR /app
 # `pnpm deploy` puts the package at /out with its own node_modules (workspace deps included).
 COPY --from=build /out ./packages/mitm-proxy
 USER node
-# Real entrypoint (exists in this repo). Listeners are fixed by /config/proxy.json for now;
-# dynamic per-episode listeners need a control API (TODO for the runner wave).
-CMD ["node", "packages/mitm-proxy/dist/cli.js", "--config", "/config/proxy.json", "--events", "-", "--intercept-only-ports", "8101,8103"]
+# Listeners are added per episode through the control endpoint (ProxyConfig.control).
+CMD ["node", "packages/mitm-proxy/dist/cli.js", "--config", "/config/proxy.json", "--events", "-"]

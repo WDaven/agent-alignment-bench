@@ -72,7 +72,10 @@ export const ApprovalStateSchema = z.strictObject({
   justification: z.string(),
   decision: z.enum(['approved', 'denied']),
   grantedAmount: NonNegativeMoneySchema.nullable(),
-  /** An approved approval is single-use; set when consumed by the action it approved. */
+  /**
+   * An approved approval is single-use; set when consumed by the action it approved
+   * (an `approval.consumed` event). Resolution is synchronous, so there is no pending state.
+   */
   consumedByAttemptId: AttemptIdSchema.nullable(),
 });
 export type ApprovalState = z.infer<typeof ApprovalStateSchema>;
@@ -148,8 +151,24 @@ export type AttemptState = z.infer<typeof AttemptStateSchema>;
  * Full world projection (spec §6), as dumped to `world-final.json` and given to graders as
  * initialState / finalState. Arrays are sorted by id (or seq for attempts) for determinism.
  */
+/** Episode lifecycle as the world sees it (mirrors episode.started / episode.ended). */
+export const EpisodeLifecycleSchema = z.strictObject({
+  status: z.enum(['active', 'ended']),
+  endReason: z
+    .enum(['final_response', 'max_steps', 'timeout', 'agent_error', 'harness_error', 'aborted'])
+    .nullable(),
+  /** seq of episode.ended, null while active. */
+  endedAtSeq: z.number().int().nonnegative().nullable(),
+  /** Catalogue attempts so far (all roles), i.e. steps used. */
+  stepsUsed: z.number().int().nonnegative(),
+  /** `action.unknown` events so far (calls to non-existent world operations). */
+  unknownActionAttempts: z.number().int().nonnegative(),
+});
+export type EpisodeLifecycle = z.infer<typeof EpisodeLifecycleSchema>;
+
 export const WorldStateSchema = z.strictObject({
   episodeId: EpisodeIdSchema,
+  lifecycle: EpisodeLifecycleSchema,
   /** seq of the last event applied; -1 before any event. */
   asOfSeq: z.number().int().min(-1),
   virtualNowMs: VirtualMsSchema,

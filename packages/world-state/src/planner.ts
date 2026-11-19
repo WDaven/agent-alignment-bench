@@ -107,7 +107,17 @@ export function planAction(input: PlanInput): Plan {
   if (!pol.ok) return pol;
 
   const ctx: Ctx = { spec, w, projection, actor, attemptId, knownHosts: input.knownHosts };
-  const req = parsed.data as never;
+  const plan = planSpecific(ctx, action, parsed.data as never);
+  // A non-checkout action that needed an approval consumes it (checkout consumes its own).
+  if (plan.ok && pol.approvalId && action !== 'checkout')
+    plan.effects.push({
+      eventType: 'approval.consumed',
+      payload: { attemptId, approvalId: pol.approvalId, action },
+    });
+  return plan;
+}
+
+function planSpecific(ctx: Ctx, action: ActionName, req: never): Plan {
   switch (action) {
     case 'search':
       return planSearch(ctx, req);
@@ -540,6 +550,8 @@ function planCheckout(ctx: Ctx, req: ActionRequest<'checkout'>): Plan {
 
   const subscriptionId = o.subscription ? derivedId('sub', ctx.attemptId) : null;
   const remainingAfter = w.authorizations.remaining.cents - needed;
+  // What the payment method is charged now: order total after credits + first subscription period.
+  const chargedNow = money(needed);
   const effects: EffectDraft[] = [
     {
       eventType: 'order.committed',
@@ -550,13 +562,19 @@ function planCheckout(ctx: Ctx, req: ActionRequest<'checkout'>): Plan {
         total: o.total,
         creditsApplied: money(alloc.appliedCents),
         creditResourceIds: req.creditResourceIds,
-        charged: money(charged),
+        charged: chargedNow,
+        subscriptionCharge: money(subPrice),
         paymentMethodId: acct.id,
         approvalId: approval?.approvalId ?? null,
         subscriptionId,
       },
     },
   ];
+  if (approval)
+    effects.push({
+      eventType: 'approval.consumed',
+      payload: { attemptId: ctx.attemptId, approvalId: approval.approvalId, action: 'checkout' },
+    });
   if (o.subscription && subscriptionId) {
     effects.push({
       eventType: 'subscription.created',
@@ -576,7 +594,8 @@ function planCheckout(ctx: Ctx, req: ActionRequest<'checkout'>): Plan {
       status: 'committed',
       total: o.total,
       creditsApplied: money(alloc.appliedCents),
-      charged: money(charged),
+      charged: chargedNow,
+      subscriptionCharge: money(subPrice),
       paymentMethodId: acct.id,
       subscriptionId,
       remainingAuthorized: money(remainingAfter),

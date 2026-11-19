@@ -59,6 +59,13 @@ export function initialProjection(spec: ScenarioSpec, episodeId: string): Projec
   const a = spec.authorization;
   const world: WorldState = {
     episodeId,
+    lifecycle: {
+      status: 'active',
+      endReason: null,
+      endedAtSeq: null,
+      stepsUsed: 0,
+      unknownActionAttempts: 0,
+    },
     asOfSeq: -1,
     virtualNowMs: 0,
     accounts: jsonClone([...w.accounts].sort((x, y) => (x.id < y.id ? -1 : 1))),
@@ -181,8 +188,20 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
   switch (e.eventType) {
     case 'episode.ended':
       next.aux.episodeEnded = true;
+      w.lifecycle.status = 'ended';
+      w.lifecycle.endReason = e.payload.reason;
+      w.lifecycle.endedAtSeq = e.seq;
       break;
+    case 'action.unknown':
+      w.lifecycle.unknownActionAttempts += 1;
+      break;
+    case 'approval.consumed': {
+      const ap = w.approvals.find((a) => a.approvalId === e.payload.approvalId);
+      if (ap) ap.consumedByAttemptId = e.payload.attemptId;
+      break;
+    }
     case 'action.attempted':
+      w.lifecycle.stepsUsed += 1;
       w.attempts.push({
         attemptId: e.payload.attemptId,
         seq: e.seq,
@@ -200,17 +219,7 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
         at.status = 'committed';
         at.outcomeSeq = e.seq;
       }
-      const action = e.payload.action;
-      // Non-checkout actions that needed an approval consume the first applicable one.
-      if (
-        action !== 'checkout' &&
-        action !== 'request_user_approval' &&
-        spec.authorization.approvalRequiredFor.includes(action) &&
-        e.role !== 'world'
-      ) {
-        const ap = findApplicableApproval(w, { role: e.role, action });
-        if (ap) ap.consumedByAttemptId = e.payload.attemptId;
-      }
+      // Approval consumption is explicit (approval.consumed), never inferred here.
       break;
     }
     case 'action.denied': {
@@ -269,10 +278,7 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
         o.approvalId = p.approvalId;
         o.committedAttemptId = p.attemptId;
       }
-      if (p.approvalId) {
-        const ap = w.approvals.find((a) => a.approvalId === p.approvalId);
-        if (ap) ap.consumedByAttemptId = p.attemptId;
-      }
+      // `charged` already includes a bundled subscription's first period (subscriptionCharge).
       w.authorizations.committedSpend = money(
         w.authorizations.committedSpend.cents + p.charged.cents,
       );
@@ -289,10 +295,12 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
         createdAttemptId: p.attemptId,
       });
       w.subscriptions.sort((a, b) => (a.subscriptionId < b.subscriptionId ? -1 : 1));
-      // The first period's charge counts against authorised spending.
-      w.authorizations.committedSpend = money(
-        w.authorizations.committedSpend.cents + p.terms.price.cents,
-      );
+      // A standalone subscription's first period counts against authorised spending. For a
+      // subscription bundled with an order it is already part of order.committed.charged.
+      if (p.orderId === null)
+        w.authorizations.committedSpend = money(
+          w.authorizations.committedSpend.cents + p.terms.price.cents,
+        );
       break;
     }
     case 'claim.submitted': {

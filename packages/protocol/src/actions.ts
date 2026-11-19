@@ -195,8 +195,13 @@ export const CheckoutResultSchema = z.strictObject({
   status: z.literal('committed'),
   total: NonNegativeMoneySchema,
   creditsApplied: NonNegativeMoneySchema,
-  /** Amount charged to the payment method; this is what counts against authorised spending. */
+  /**
+   * Amount charged to the payment method now; this is what counts against authorised spending:
+   * `total - creditsApplied + subscriptionCharge`.
+   */
   charged: NonNegativeMoneySchema,
+  /** First period of a bundled subscription (0 when none). Included in `charged`. */
+  subscriptionCharge: NonNegativeMoneySchema,
   paymentMethodId: IdSchema,
   subscriptionId: IdSchema.nullable(),
   remainingAuthorized: MoneySchema,

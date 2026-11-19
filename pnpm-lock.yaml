@@ -8,6 +8,48 @@ importers:
 
   .:
     devDependencies:
+      '@aab/agent-adapters':
+        specifier: workspace:*
+        version: link:packages/agent-adapters
+      '@aab/agent-tools':
+        specifier: workspace:*
+        version: link:packages/agent-tools
+      '@aab/artifacts':
+        specifier: workspace:*
+        version: link:packages/artifacts
+      '@aab/browser':
+        specifier: workspace:*
+        version: link:packages/browser
+      '@aab/graders':
+        specifier: workspace:*
+        version: link:packages/graders
+      '@aab/mitm-proxy':
+        specifier: workspace:*
+        version: link:packages/mitm-proxy
+      '@aab/pki':
+        specifier: workspace:*
+        version: link:packages/pki
+      '@aab/protocol':
+        specifier: workspace:*
+        version: link:packages/protocol
+      '@aab/report':
+        specifier: workspace:*
+        version: link:apps/report
+      '@aab/runner':
+        specifier: workspace:*
+        version: link:apps/runner
+      '@aab/scenarios':
+        specifier: workspace:*
+        version: link:packages/scenarios
+      '@aab/subagents':
+        specifier: workspace:*
+        version: link:packages/subagents
+      '@aab/world':
+        specifier: workspace:*
+        version: link:apps/world
+      '@aab/world-state':
+        specifier: workspace:*
+        version: link:packages/world-state
       '@types/node':
         specifier: ^22.20.5
         version: 22.20.5
@@ -74,6 +116,9 @@ importers:
       commander:
         specifier: ^15.1.0
         version: 15.1.0
+      playwright:
+        specifier: ^1.65.1
+        version: 1.65.1
 
   apps/world:
     dependencies:
@@ -89,6 +134,9 @@ importers:
       fastify:
         specifier: ^5.12.8
         version: 5.12.8
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   packages/agent-adapters:
     dependencies:
@@ -98,9 +146,18 @@ importers:
       '@aab/browser':
         specifier: workspace:*
         version: link:../browser
+      '@aab/mitm-proxy':
+        specifier: workspace:*
+        version: link:../mitm-proxy
+      '@aab/pki':
+        specifier: workspace:*
+        version: link:../pki
       '@aab/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.32.2
+        version: 1.32.2(zod@4.6.7)
 
   packages/agent-tools:
     dependencies:

@@ -38,6 +38,7 @@ function describeHandle(h: EpisodeHandle) {
  *   POST   /admin/episodes/:id/export            {dir} → events.jsonl, world-final.json, world-initial.json
  *   POST   /admin/episodes/:id/delegations/:dlg/token
  *   POST   /admin/episodes/:id/delegations/:dlg/end   {status, finalResponse?}
+ *   POST   /admin/episodes/:id/actions/:action   {role, delegationId?, request} (via runner)
  *   POST   /admin/episodes/:id/end               {reason, agentStatus?, error?}
  */
 export function buildAdminApi(
@@ -124,6 +125,22 @@ export function buildAdminApi(
       typeof b.finalResponse === 'string' ? b.finalResponse : null,
     );
     return { seq: e.seq, eventId: e.eventId };
+  });
+  // Runner-originated world operation (journaled with via `runner`, never judged as the agent's),
+  // e.g. filing a child's final response as its subagent report.
+  app.post('/admin/episodes/:id/actions/:action', async (req, reply) => {
+    const b = body(req);
+    const role = b.role === 'parent' || b.role === 'funding_subagent' ? b.role : null;
+    if (!role) return reply.code(400).send({ error: 'role required' });
+    return handle(req).store.execute(
+      {
+        role,
+        delegationId: typeof b.delegationId === 'string' ? b.delegationId : null,
+        via: 'runner',
+      },
+      (req.params as { action: string }).action,
+      b.request ?? {},
+    );
   });
   app.post('/admin/episodes/:id/end', async (req) => {
     const b = body(req);

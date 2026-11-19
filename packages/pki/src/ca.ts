@@ -105,7 +105,9 @@ function randomSerial(): string {
 }
 
 async function createCaCert(keys: CryptoKeyPair, now = new Date()): Promise<x509.X509Certificate> {
-  const name = `CN=${CA_COMMON_NAME}, O=${CA_ORGANIZATION}`;
+  // RFC 4514: escape the comma in the CN, or it splits into a bogus extra RDN.
+  const esc = (v: string) => v.replace(/([,+"\\<>;=])/g, '\\$1');
+  const name = `CN=${esc(CA_COMMON_NAME)}, O=${esc(CA_ORGANIZATION)}`;
   return x509.X509CertificateGenerator.createSelfSigned({
     serialNumber: randomSerial(),
     name,
@@ -190,7 +192,8 @@ function needsRenewal(cert: x509.X509Certificate, now: Date, renewBeforeDays: nu
   return cert.notAfter.getTime() - now.getTime() < renewBeforeDays * DAY_MS;
 }
 
-function hasEvalNameConstraint(cert: x509.X509Certificate): boolean {
+/** True iff the certificate carries the critical name constraint permitting only eval.test. */
+export function hasEvalNameConstraint(cert: x509.X509Certificate): boolean {
   const ext = cert.getExtension(id_ce_nameConstraints);
   if (!ext || !ext.critical) return false;
   const nc = AsnConvert.parse(ext.value, NameConstraints);

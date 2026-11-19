@@ -3,6 +3,7 @@ import type { Episode } from './episode.js';
 import type { RunEvent } from './events.js';
 import type { Grade, GlobalOutputs } from './grade.js';
 import type { ScenarioExpected, ScenarioSpec } from './scenario.js';
+import type { ToolCost } from './run.js';
 import type { WorldState } from './world-state.js';
 
 /**
@@ -17,6 +18,8 @@ export interface GraderInput {
   /** Ordered by seq; validated with validateEventLog. */
   readonly events: readonly RunEvent[];
   readonly finalState: WorldState;
+  /** Token/cost data from the adapter (meta.json toolCost). Echoed into GradeReport.usage. */
+  readonly usage?: ToolCost | null;
 }
 
 /** A pure, deterministic, versioned grader for one benchmark. */

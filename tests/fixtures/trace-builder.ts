@@ -32,7 +32,7 @@ import {
   type VerificationCheck,
   type WorldState,
   type BudgetExtensionState,
-} from '../../packages/protocol/src/index.js';
+} from '@aab/protocol';
 
 type TrapExposureKind = 'rendered' | 'search_result' | 'api_response' | 'subagent_report';
 
@@ -437,7 +437,9 @@ export class TraceBuilder {
     }
     for (const d of o.discounts)
       this.used.set(d.couponResourceId, (this.used.get(d.couponResourceId) ?? 0) + d.amount.cents);
-    const charged = o.total.cents - credits;
+    const subscriptionCharge = o.subscription?.price.cents ?? 0;
+    // Engine semantics: charged = total - credits + first subscription period.
+    const charged = o.total.cents - credits + subscriptionCharge;
     const subscriptionId = o.subscription ? this.id('sub') : null;
     this.emit({
       ...this.env(actor),
@@ -450,11 +452,18 @@ export class TraceBuilder {
         creditsApplied: usd(credits),
         creditResourceIds: opts.creditResourceIds ?? [],
         charged: usd(charged),
+        subscriptionCharge: usd(subscriptionCharge),
         paymentMethodId: request['paymentMethodId'] as string,
         approvalId: opts.approvalId ?? null,
         subscriptionId,
       },
     });
+    if (opts.approvalId && this.approvals.has(opts.approvalId))
+      this.emit({
+        ...this.env(actor),
+        eventType: 'approval.consumed',
+        payload: { attemptId, approvalId: opts.approvalId, action: 'checkout' },
+      });
     if (o.subscription && subscriptionId) {
       this.emit({
         ...this.env(actor),
@@ -484,6 +493,7 @@ export class TraceBuilder {
       total: o.total,
       creditsApplied: usd(credits),
       charged: usd(charged),
+      subscriptionCharge: usd(subscriptionCharge),
       paymentMethodId: request['paymentMethodId'],
       subscriptionId,
       remainingAuthorized: usd(remaining),
@@ -532,6 +542,7 @@ export class TraceBuilder {
       status: 'active',
       createdAttemptId: attemptId,
     });
+    this.committedSpend += priceCents;
     this.commit(actor, attemptId, 'create_subscription', { subscriptionId, status: 'active' });
     return attemptId;
   }
@@ -904,7 +915,15 @@ export class TraceBuilder {
     this.emit({
       ...this.env(actor),
       eventType: 'network.denied',
-      payload: { host, port: 443, method: 'CONNECT', url: null, transport: 'connect', reason },
+      payload: {
+        listener: 'browser',
+        host,
+        port: 443,
+        method: 'CONNECT',
+        url: null,
+        transport: 'connect',
+        reason,
+      },
     });
     return this;
   }
@@ -915,6 +934,7 @@ export class TraceBuilder {
       eventType: 'network.request',
       payload: {
         requestId: this.id('req'),
+        listener: 'browser',
         method: 'GET',
         url,
         host: new URL(url).host,
@@ -966,8 +986,16 @@ export class TraceBuilder {
     const ext = final ? this.extensions.reduce((s, e) => s + e.amount.cents, 0) : 0;
     const spend = final ? this.committedSpend : 0;
     const last = this.events[this.events.length - 1];
+    const endedEv = final ? this.events.find((e) => e.eventType === 'episode.ended') : undefined;
     return {
       episodeId: this.episodeId,
+      lifecycle: {
+        status: endedEv ? 'ended' : 'active',
+        endReason: endedEv && endedEv.eventType === 'episode.ended' ? endedEv.payload.reason : null,
+        endedAtSeq: endedEv?.seq ?? null,
+        stepsUsed: final ? this.attempts.size : 0,
+        unknownActionAttempts: 0,
+      },
       asOfSeq: final ? (last?.seq ?? -1) : -1,
       virtualNowMs: final ? (last?.occurredAtVirtualMs ?? 0) : 0,
       accounts: this.spec.world.accounts,

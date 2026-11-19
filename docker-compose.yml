@@ -1,21 +1,25 @@
 # Hard isolation for evaluation runs (docs/threat-model.md, docs/architecture.md "Hard isolation").
 #
-#   runner (agent CLI + Chromium) ──agent_net (internal)──► proxy ──egress──► model API only
-#                                                    │        │
-#                                                    │        └─world_net (internal)─► world site host
-#                                                    └──────────────────────────────► world agent API
+#   runner (orchestrator + agent CLI + Chromium)
+#     ├─ agent_net (internal) ──► proxy listeners 172.30.0.2:* ──egress──► model API only
+#     │                      └──► world agent API 172.30.0.3:7800   (MCP servers, bearer tokens)
+#     └─ harness_net (internal) ► world admin API 172.29.0.3:7820    (admin secret)
+#                              └► proxy control  172.29.0.2:8090     (control token)
+#   proxy ── world_net (internal) ──► world site host 172.31.0.3:7810 (proxy secret header)
 #
-# * `runner` is attached ONLY to `agent_net` (internal: true): no default route, no NAT. Its sole
-#   way out is the proxy's listener IP. Its DNS forwarder is a dead address, so external names do
-#   not resolve even if a process ignores the proxy.
-# * `world` site host listens only on `world_net`, which the runner is not on — so the runner can
-#   never send forged x-bench-* headers to it directly; it only sees traffic the proxy forwarded.
-# * world admin API binds 127.0.0.1 inside the world container (use `docker compose exec`).
-# * `proxy` is the only service on `egress`.
+# * `runner` has NO route out: agent_net and harness_net are `internal: true`; its DNS forwarder is
+#   a dead address, so external names do not resolve even if a process ignores the proxy.
+# * The world site host binds only on world_net (the runner is not on it) AND requires the
+#   proxy→world shared secret, so forged x-bench-* headers cannot reach it.
+# * `proxy` is the only service on `egress`. Per-episode listeners are added at runtime through
+#   its control endpoint (harness_net only).
+# * The runner mounts PUBLIC trust material only; the CA keys live in the proxy container.
 #
-# Before `up`: create the CA on the host (`pnpm bench:pki` / ensureCa('.bench/pki')) and a
-# ProxyConfig at .bench/docker/proxy.json (start from docker/proxy.config.example.json).
-# Static addresses below are referenced by that config; keep them in sync.
+# Setup (writes .bench/docker/proxy.json + secrets, then builds and starts world + proxy):
+#   pnpm bench:pki init && pnpm bench:up -- --compose
+# Run (inside the runner container; isolation: container):
+#   pnpm bench:run -- --compose --scenario B0-clean-purchase-001 --agent scripted
+# Keep the static addresses in sync with apps/runner/src/compose.ts (COMPOSE_NET).
 
 name: agent-alignment-bench
 
@@ -33,6 +37,11 @@ networks:
     ipam:
       config:
         - subnet: 172.31.0.0/24
+  harness_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
   egress: {}
 
 services:
@@ -45,11 +54,15 @@ services:
         ipv4_address: 172.30.0.2
       world_net:
         ipv4_address: 172.31.0.2
+      harness_net:
+        ipv4_address: 172.29.0.2
       egress: {}
     volumes:
       # Whole PKI dir (the proxy is the only holder of private keys).
       - ./.bench/pki:/pki:ro
       - ./.bench/docker/proxy.json:/config/proxy.json:ro
+      - ./.bench/docker/secrets/proxy-secret:/secrets/proxy-secret:ro
+      - ./.bench/docker/secrets/control-token:/secrets/control-token:ro
       - ./.bench/docker/events:/events
     command:
       [
@@ -59,8 +72,6 @@ services:
         '/config/proxy.json',
         '--events',
         '/events/network.jsonl',
-        '--intercept-only-ports',
-        '8101,8103',
       ]
     read_only: true
     cap_drop: [ALL]
@@ -76,18 +87,23 @@ services:
         ipv4_address: 172.30.0.3
       world_net:
         ipv4_address: 172.31.0.3
+      harness_net:
+        ipv4_address: 172.29.0.3
     environment:
-      # PLACEHOLDER variable names — apps/world (another wave) decides the real ones.
-      WORLD_AGENT_API_HOST: 172.30.0.3
-      WORLD_AGENT_API_PORT: '7800'
-      WORLD_SITE_HOST: 172.31.0.3
-      WORLD_SITE_PORT: '7810'
-      WORLD_ADMIN_HOST: 127.0.0.1
-      WORLD_ADMIN_PORT: '7820'
-      WORLD_NETWORK_EVENTS: /events/network.jsonl
+      AAB_WORLD_HOST: 172.30.0.3
+      AAB_AGENT_API_PORT: '7800'
+      AAB_SITE_HOST: 172.31.0.3
+      AAB_SITE_PORT: '7810'
+      AAB_ADMIN_HOST: 172.29.0.3
+      AAB_ADMIN_PORT: '7820'
+      AAB_RUN_SECRET_FILE: /secrets/run-secret
+      AAB_ADMIN_SECRET_FILE: /secrets/admin-secret
+      AAB_PROXY_SECRET_FILE: /secrets/proxy-secret
     volumes:
-      - ./.bench/docker/events:/events:ro
-      - ./runs:/runs
+      - ./.bench/docker/secrets/run-secret:/secrets/run-secret:ro
+      - ./.bench/docker/secrets/admin-secret:/secrets/admin-secret:ro
+      - ./.bench/docker/secrets/proxy-secret:/secrets/proxy-secret:ro
+    read_only: true
     cap_drop: [ALL]
     security_opt: ['no-new-privileges:true']
 
@@ -96,42 +112,34 @@ services:
       <<: *node-build
       dockerfile: docker/runner.Dockerfile
     depends_on: [proxy, world]
+    profiles: [run]
     networks:
       agent_net:
         ipv4_address: 172.30.0.10
-    # Dead upstream for Docker's embedded DNS: service names still resolve, nothing else does.
+      harness_net:
+        ipv4_address: 172.29.0.10
+    # Dead upstream for Docker's embedded DNS: nothing external resolves.
     dns: [127.0.0.1]
     environment:
-      HTTPS_PROXY: http://172.30.0.2:8100
-      HTTP_PROXY: http://172.30.0.2:8100
-      https_proxy: http://172.30.0.2:8100
-      http_proxy: http://172.30.0.2:8100
-      NO_PROXY: ''
-      no_proxy: ''
-      # trustEnv('/pki') from @aab/pki, spelled out:
-      NODE_EXTRA_CA_CERTS: /pki/ca.pem
-      SSL_CERT_FILE: /pki/ca-bundle.pem
-      CODEX_CA_CERTIFICATE: /pki/ca-bundle.pem
-      REQUESTS_CA_BUNDLE: /pki/ca-bundle.pem
-      CURL_CA_BUNDLE: /pki/ca-bundle.pem
-      GIT_SSL_CAINFO: /pki/ca-bundle.pem
-      # AGENT_CLI_QUIET_ENV from @aab/mitm-proxy:
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
-      DISABLE_AUTOUPDATER: '1'
-      DISABLE_TELEMETRY: '1'
-      DISABLE_ERROR_REPORTING: '1'
+      AAB_BACKEND: remote
+      AAB_WORLD_ADMIN_URL: http://172.29.0.3:7820
+      AAB_ADMIN_SECRET_FILE: /secrets/admin-secret
+      AAB_WORLD_AGENT_API_URL: http://172.30.0.3:7800
+      AAB_PROXY_CONTROL_URL: http://172.29.0.2:8090
+      AAB_PROXY_CONTROL_TOKEN_FILE: /secrets/control-token
+      AAB_PROXY_HOST: 172.30.0.2
+      AAB_PKI_DIR: /pki
+      AAB_RUNS_DIR: /runs
       # Model credentials come from the host environment (never baked into the image).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # The bench MCP server talks to the world agent API directly (bearer-token authenticated).
-      BENCH_WORLD_AGENT_API: http://172.30.0.3:7800
-      # Chromium in this container proxies through the browser-purpose listener.
-      BENCH_BROWSER_PROXY: http://172.30.0.2:8101
     volumes:
       # PUBLIC trust material only — no private keys in the agent's container.
       - ./.bench/pki/ca.pem:/pki/ca.pem:ro
       - ./.bench/pki/ca-bundle.pem:/pki/ca-bundle.pem:ro
       - ./.bench/pki/leaf-pub.pem:/pki/leaf-pub.pem:ro
+      - ./.bench/docker/secrets/admin-secret:/secrets/admin-secret:ro
+      - ./.bench/docker/secrets/control-token:/secrets/control-token:ro
       - ./runs:/runs
     shm_size: 1gb
     cap_drop: [ALL]

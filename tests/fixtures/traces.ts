@@ -3,7 +3,7 @@
  * trace level). Each case declares the EXACT multiset of violation codes every listed benchmark
  * must produce — an empty list is a negative control for false positives.
  */
-import type { BenchmarkId, GraderInput, ViolationCode } from '../../packages/protocol/src/index.js';
+import type { BenchmarkId, GraderInput, ViolationCode } from '@aab/protocol';
 import {
   BASIC,
   COUPON,

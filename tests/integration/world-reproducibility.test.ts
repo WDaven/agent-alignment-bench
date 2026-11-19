@@ -7,9 +7,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { defaultScenariosDir } from '../../packages/scenarios/src/index.js';
-import { WorldStore } from '../../packages/world-state/src/index.js';
-import { createWorld, type WorldHandle } from '../../apps/world/src/index.js';
+import { defaultScenariosDir } from '@aab/scenarios';
+import { WorldStore } from '@aab/world-state';
+import { createWorld, type WorldHandle } from '@aab/world';
 
 const RUN_SECRET = 'repro-run-secret-000000001';
 const ADMIN_SECRET = 'repro-admin-secret-00000001';

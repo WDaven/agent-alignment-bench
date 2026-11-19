@@ -12,7 +12,7 @@ export interface CreateWorldOptions {
   runSecret: string;
   /** Secret for the admin API (>= 16 chars). Must differ from runSecret. */
   adminSecret: string;
-  /** Bind address of the agent and site listeners (default 127.0.0.1). The admin API is always 127.0.0.1. */
+  /** Bind address of the agent API (and site host unless `siteHost`), default 127.0.0.1. */
   host?: string;
   /** 0 (default) = pick a free port. */
   agentApiPort?: number;
@@ -24,6 +24,19 @@ export interface CreateWorldOptions {
   scenariosDir?: string | null;
   /** Per-episode SQLite files go here; null/undefined = in-memory. */
   dataDir?: string | null;
+  /**
+   * Shared secret the MITM proxy injects (TRUSTED_HEADERS.proxySecret). When set (>= 16 chars),
+   * the site host refuses every request without it, so reaching the site-host port directly
+   * cannot forge an identity. null = no check (only for tests that drive the site host directly).
+   */
+  proxySecret?: string | null;
+  /** Bind address of the site host (default: `host`). */
+  siteHost?: string;
+  /**
+   * Bind address of the admin API (default 127.0.0.1). In docker it is the harness-network IP,
+   * reachable only by the runner's orchestration and protected by `adminSecret`.
+   */
+  adminHost?: string;
 }
 
 export interface WorldHandle {
@@ -58,11 +71,17 @@ async function listen(app: FastifyInstance, host: string, port: number): Promise
 export async function createWorld(opts: CreateWorldOptions): Promise<WorldHandle> {
   if (opts.runSecret === opts.adminSecret)
     throw new Error('adminSecret must differ from runSecret');
+  const proxySecret = opts.proxySecret ?? null;
+  if (proxySecret !== null && proxySecret.length < 16)
+    throw new Error('proxySecret must be at least 16 characters');
+  if (proxySecret !== null && (proxySecret === opts.runSecret || proxySecret === opts.adminSecret))
+    throw new Error('proxySecret must differ from runSecret and adminSecret');
   const plugins = [probePlugin, ...(opts.plugins ?? []).filter((p) => p.id !== probePlugin.id)];
   const registry = new EpisodeRegistry({
     runSecret: opts.runSecret,
     dataDir: opts.dataDir ?? null,
     knownHosts: plugins.flatMap((p) => p.hosts),
+    proxySecret,
   });
   const host = opts.host ?? '127.0.0.1';
   const agentApi = buildAgentApi(registry);
@@ -74,8 +93,8 @@ export async function createWorld(opts: CreateWorldOptions): Promise<WorldHandle
   const apps = [agentApi, siteHost, adminApi];
   try {
     const agentApiPort = await listen(agentApi, host, opts.agentApiPort ?? 0);
-    const sitePort = await listen(siteHost, host, opts.sitePort ?? 0);
-    const adminPort = await listen(adminApi, '127.0.0.1', opts.adminPort ?? 0);
+    const sitePort = await listen(siteHost, opts.siteHost ?? host, opts.sitePort ?? 0);
+    const adminPort = await listen(adminApi, opts.adminHost ?? '127.0.0.1', opts.adminPort ?? 0);
     let closed = false;
     return {
       host,

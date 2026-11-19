@@ -50,6 +50,7 @@ export const EventTypeSchema = z.enum([
   'action.attempted',
   'action.committed',
   'action.denied',
+  'action.unknown',
   'order.reserved',
   'coupon.applied',
   'order.committed',
@@ -60,6 +61,7 @@ export const EventTypeSchema = z.enum([
   'budget.extended',
   'approval.requested',
   'approval.resolved',
+  'approval.consumed',
   'delegation.started',
   'delegation.ended',
   'subagent.report',
@@ -173,6 +175,22 @@ export const ActionDeniedPayloadSchema = z.strictObject({
   authorizationDecision: AuthorizationDecisionSchema,
 });
 
+/**
+ * An agent asked for a world operation that is not in the catalogue (e.g. a hallucinated bench
+ * tool or a direct `POST /v1/actions/<name>`). Journaled because it is behaviour worth recording;
+ * it is attempt + denial in one event (reason is always `unknown_action`) and needs no outcome.
+ * It never changes state and is not an `action.attempted` (graders judge only catalogue actions).
+ */
+export const ActionUnknownPayloadSchema = z.strictObject({
+  attemptId: AttemptIdSchema,
+  /** The name the agent used, truncated to 128 chars. Untrusted. */
+  requestedAction: z.string().max(128),
+  request: z.unknown(),
+  via: ActionViaSchema,
+  toolCallId: IdSchema.nullable(),
+  reason: z.literal('unknown_action'),
+});
+
 export const OrderReservedPayloadSchema = z.strictObject({
   attemptId: AttemptIdSchema,
   quote: OrderQuoteSchema,
@@ -193,8 +211,13 @@ export const OrderCommittedPayloadSchema = z.strictObject({
   total: NonNegativeMoneySchema,
   creditsApplied: NonNegativeMoneySchema,
   creditResourceIds: z.array(ResourceIdSchema),
-  /** Counts against authorised spending. */
+  /**
+   * Counts against authorised spending: `total - creditsApplied + subscriptionCharge`.
+   * committedSpend = sum of `charged` over all order.committed events.
+   */
   charged: NonNegativeMoneySchema,
+  /** First period of a subscription bundled with the order (0 when none); included in `charged`. */
+  subscriptionCharge: NonNegativeMoneySchema,
   paymentMethodId: IdSchema,
   approvalId: ApprovalIdSchema.nullable(),
   subscriptionId: IdSchema.nullable(),
@@ -268,6 +291,16 @@ export const ApprovalResolvedPayloadSchema = z.strictObject({
   message: z.string(),
 });
 
+/**
+ * An approved approval was used up by the attempt that relied on it (approvals are single-use).
+ * Emitted by the world in the same commit as that attempt, before its action.committed.
+ */
+export const ApprovalConsumedPayloadSchema = z.strictObject({
+  attemptId: AttemptIdSchema,
+  approvalId: ApprovalIdSchema,
+  action: ActionNameSchema,
+});
+
 export const DelegationStartedPayloadSchema = z.strictObject({
   attemptId: AttemptIdSchema,
   delegationId: DelegationIdSchema,
@@ -320,11 +353,15 @@ export const TrapExposedPayloadSchema = z.strictObject({
 });
 
 export const NetworkPolicyActionSchema = z.enum(['intercept', 'passthrough', 'deny']);
+
+/** Purpose of the proxy listener the traffic arrived on (proxy.ts ListenerPurpose). */
+export const NetworkListenerSchema = z.enum(['browser', 'cli', 'any']);
 export type NetworkPolicyAction = z.infer<typeof NetworkPolicyActionSchema>;
 
 /** An intercepted (decrypted) request to *.eval.test, forwarded to the world service. */
 export const NetworkRequestPayloadSchema = z.strictObject({
   requestId: IdSchema,
+  listener: NetworkListenerSchema,
   method: z.string(),
   url: z.string(),
   host: HostSchema,
@@ -338,6 +375,7 @@ export const NetworkRequestPayloadSchema = z.strictObject({
 /** A blind CONNECT tunnel to an allowlisted passthrough host (e.g. the model API). Not decrypted. */
 export const NetworkTunnelPayloadSchema = z.strictObject({
   tunnelId: IdSchema,
+  listener: NetworkListenerSchema,
   host: HostSchema,
   port: z.number().int().min(1).max(65535),
   outcome: z.enum(['closed', 'error']),
@@ -358,10 +396,15 @@ export const NetworkDenialReasonSchema = z.enum([
   'malformed_request',
   /** Request arrived on a listener not bound to an active episode/role. */
   'unknown_listener',
+  /** TLS ClientHello SNI differs from the CONNECT authority of an intercepted tunnel. */
+  'sni_mismatch',
+  /** Inner request `Host` differs from the CONNECT authority (or, for plain HTTP, from the URL). */
+  'host_mismatch',
 ]);
 export type NetworkDenialReason = z.infer<typeof NetworkDenialReasonSchema>;
 
 export const NetworkDeniedPayloadSchema = z.strictObject({
+  listener: NetworkListenerSchema,
   host: z.string(),
   port: z.number().int().nullable(),
   method: z.string().nullable(),
@@ -370,9 +413,18 @@ export const NetworkDeniedPayloadSchema = z.strictObject({
   reason: NetworkDenialReasonSchema,
 });
 
+/**
+ * Where a tool call was observed. `browser` / `bench`: journaled by the harness MCP server itself.
+ * `cli`: a built-in tool of the agent CLI (shell, web fetch, file edit, ...) seen in the CLI's
+ * structured output — the harness does not control those paths, so any such call is a harness
+ * finding (`uncontrolled_tool_used`).
+ */
+export const ToolCallServerSchema = z.enum([...McpServerNameSchema.options, 'cli']);
+export type ToolCallServer = z.infer<typeof ToolCallServerSchema>;
+
 export const ToolCallPayloadSchema = z.strictObject({
   toolCallId: IdSchema,
-  server: McpServerNameSchema,
+  server: ToolCallServerSchema,
   /** MCP tool name (browser tools are open-ended; bench tool names equal ActionNames). */
   tool: z.string(),
   args: JsonValueSchema,
@@ -413,6 +465,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   'action.attempted': ActionAttemptedPayloadSchema,
   'action.committed': ActionCommittedPayloadSchema,
   'action.denied': ActionDeniedPayloadSchema,
+  'action.unknown': ActionUnknownPayloadSchema,
   'order.reserved': OrderReservedPayloadSchema,
   'coupon.applied': CouponAppliedPayloadSchema,
   'order.committed': OrderCommittedPayloadSchema,
@@ -423,6 +476,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   'budget.extended': BudgetExtendedPayloadSchema,
   'approval.requested': ApprovalRequestedPayloadSchema,
   'approval.resolved': ApprovalResolvedPayloadSchema,
+  'approval.consumed': ApprovalConsumedPayloadSchema,
   'delegation.started': DelegationStartedPayloadSchema,
   'delegation.ended': DelegationEndedPayloadSchema,
   'subagent.report': SubagentReportPayloadSchema,
@@ -441,6 +495,7 @@ export const RunEventSchema = z.discriminatedUnion('eventType', [
   ev('action.attempted', ActionAttemptedPayloadSchema),
   ev('action.committed', ActionCommittedPayloadSchema),
   ev('action.denied', ActionDeniedPayloadSchema),
+  ev('action.unknown', ActionUnknownPayloadSchema),
   ev('order.reserved', OrderReservedPayloadSchema),
   ev('coupon.applied', CouponAppliedPayloadSchema),
   ev('order.committed', OrderCommittedPayloadSchema),
@@ -451,6 +506,7 @@ export const RunEventSchema = z.discriminatedUnion('eventType', [
   ev('budget.extended', BudgetExtendedPayloadSchema),
   ev('approval.requested', ApprovalRequestedPayloadSchema),
   ev('approval.resolved', ApprovalResolvedPayloadSchema),
+  ev('approval.consumed', ApprovalConsumedPayloadSchema),
   ev('delegation.started', DelegationStartedPayloadSchema),
   ev('delegation.ended', DelegationEndedPayloadSchema),
   ev('subagent.report', SubagentReportPayloadSchema),
@@ -518,7 +574,12 @@ export function validateEventLog(
     const prev = events[i - 1];
     if (prev && e.occurredAtVirtualMs < prev.occurredAtVirtualMs)
       problems.push(`event ${e.eventId}: virtual time went backwards`);
-    if (e.eventType === 'action.attempted') {
+    if (e.eventType === 'action.unknown') {
+      if (attempts.has(e.payload.attemptId) || outcomes.has(e.payload.attemptId))
+        problems.push(`duplicate attemptId ${e.payload.attemptId}`);
+      outcomes.set(e.payload.attemptId, e.seq);
+      attempts.set(e.payload.attemptId, e.seq);
+    } else if (e.eventType === 'action.attempted') {
       if (attempts.has(e.payload.attemptId))
         problems.push(`duplicate attemptId ${e.payload.attemptId}`);
       attempts.set(e.payload.attemptId, e.seq);

@@ -7,8 +7,8 @@ import {
   WorldStateSchema,
   validateEventLog,
   type BenchmarkId,
-} from '../../packages/protocol/src/index.js';
-import { gradeEpisode } from '../../packages/graders/src/index.js';
+} from '@aab/protocol';
+import { gradeEpisode } from '@aab/graders';
 import { TRACE_CASES } from '../fixtures/traces.js';
 
 describe('grader contract: crafted traces trigger exactly the intended violations', () => {

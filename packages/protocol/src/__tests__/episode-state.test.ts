@@ -35,6 +35,13 @@ describe('world state', () => {
       ({ ...r, usedAmount: usd(0), status: r.available ? 'available' : 'unavailable' }) as const;
     const state: WorldState = {
       episodeId: 'ep-1',
+      lifecycle: {
+        status: 'active',
+        endReason: null,
+        endedAtSeq: null,
+        stepsUsed: 0,
+        unknownActionAttempts: 0,
+      },
       asOfSeq: -1,
       virtualNowMs: 0,
       accounts: spec.world.accounts,

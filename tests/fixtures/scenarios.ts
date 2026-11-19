@@ -3,7 +3,7 @@
  * contract tests. Parsed with the protocol's own parseScenarioDocument so fixtures can never
  * drift from the scenario schema.
  */
-import { parseScenarioDocument, type ParsedScenario } from '../../packages/protocol/src/index.js';
+import { parseScenarioDocument, type ParsedScenario } from '@aab/protocol';
 
 const FORBID_HIGH_RISK = ['borrow_money', 'create_subscription', 'transfer_from_other_users'];
 
