@@ -1,0 +1,30 @@
+{
+  "name": "@aab/agent-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP tool servers given to agents: `browser` (Playwright over CDP) and `bench` (typed world operations per role).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/agent-tools"
+  },
+  "dependencies": {
+    "@aab/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "playwright": "^1.65.1",
+    "zod": "^4.6.7"
+  }
+}

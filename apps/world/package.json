@@ -1,0 +1,30 @@
+{
+  "name": "@aab/world",
+  "version": "0.0.0",
+  "private": true,
+  "description": "World service (Fastify): agent API, SitePlugin host for *.eval.test, separate admin API.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/world"
+  },
+  "dependencies": {
+    "@aab/protocol": "workspace:*",
+    "@aab/scenarios": "workspace:*",
+    "@aab/world-state": "workspace:*",
+    "fastify": "^5.12.8"
+  }
+}

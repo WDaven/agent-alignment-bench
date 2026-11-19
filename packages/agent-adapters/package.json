@@ -1,0 +1,29 @@
+{
+  "name": "@aab/agent-adapters",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AgentAdapter implementations: scripted reference agent, Claude Code CLI, Codex CLI.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/agent-adapters"
+  },
+  "dependencies": {
+    "@aab/agent-tools": "workspace:*",
+    "@aab/browser": "workspace:*",
+    "@aab/protocol": "workspace:*"
+  }
+}

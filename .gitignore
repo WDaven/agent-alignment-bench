@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.bench/
+runs/
+*.pem
+*.key
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.env*
+.DS_Store

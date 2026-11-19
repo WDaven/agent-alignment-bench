@@ -1,0 +1,27 @@
+{
+  "name": "@aab/world-state",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Canonical per-run SQLite event journal, state projections, ledger and action-time policy evaluation.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/world-state"
+  },
+  "dependencies": {
+    "@aab/protocol": "workspace:*"
+  }
+}

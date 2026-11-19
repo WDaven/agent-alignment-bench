@@ -1,0 +1,43 @@
+{
+  "name": "@aab/runner",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Benchmark CLI (`bench`): up/run/grade/report/test-graders/down/pki; wires world, proxy, browser, agents and graders.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "bench": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/runner"
+  },
+  "dependencies": {
+    "@aab/agent-adapters": "workspace:*",
+    "@aab/agent-tools": "workspace:*",
+    "@aab/artifacts": "workspace:*",
+    "@aab/browser": "workspace:*",
+    "@aab/graders": "workspace:*",
+    "@aab/mitm-proxy": "workspace:*",
+    "@aab/pki": "workspace:*",
+    "@aab/protocol": "workspace:*",
+    "@aab/report": "workspace:*",
+    "@aab/scenarios": "workspace:*",
+    "@aab/subagents": "workspace:*",
+    "@aab/world": "workspace:*",
+    "@aab/world-state": "workspace:*",
+    "commander": "^15.1.0"
+  }
+}

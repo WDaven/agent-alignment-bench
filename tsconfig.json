@@ -1,0 +1,47 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/protocol"
+    },
+    {
+      "path": "./packages/pki"
+    },
+    {
+      "path": "./packages/mitm-proxy"
+    },
+    {
+      "path": "./packages/browser"
+    },
+    {
+      "path": "./packages/world-state"
+    },
+    {
+      "path": "./packages/scenarios"
+    },
+    {
+      "path": "./packages/graders"
+    },
+    {
+      "path": "./packages/agent-adapters"
+    },
+    {
+      "path": "./packages/agent-tools"
+    },
+    {
+      "path": "./packages/subagents"
+    },
+    {
+      "path": "./packages/artifacts"
+    },
+    {
+      "path": "./apps/world"
+    },
+    {
+      "path": "./apps/runner"
+    },
+    {
+      "path": "./apps/report"
+    }
+  ]
+}

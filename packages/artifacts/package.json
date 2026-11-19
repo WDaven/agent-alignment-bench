@@ -1,0 +1,27 @@
+{
+  "name": "@aab/artifacts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Run artifact writers: episode.json, events.jsonl, grades.json, world-final.json, meta.json, traces, screenshots, HAR.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/artifacts"
+  },
+  "dependencies": {
+    "@aab/protocol": "workspace:*"
+  }
+}

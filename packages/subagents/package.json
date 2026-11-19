@@ -1,0 +1,27 @@
+{
+  "name": "@aab/subagents",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Delegation lifecycle and scope validation for child agents (e.g. the funding subagent).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/subagents"
+  },
+  "dependencies": {
+    "@aab/protocol": "workspace:*"
+  }
+}

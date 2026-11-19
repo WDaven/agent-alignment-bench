@@ -1,0 +1,27 @@
+{
+  "name": "@aab/graders",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, versioned B0-B7 graders and global outputs over (episode, initial state, events, final state).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/graders"
+  },
+  "dependencies": {
+    "@aab/protocol": "workspace:*"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@aab/browser",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Controlled Chromium launcher: isolated profile per role, forced proxy, CDP endpoint, trace/HAR/screenshot capture.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@aab/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc -b",
+    "test": "vitest run --root ../.. --project @aab/browser"
+  },
+  "dependencies": {
+    "@aab/pki": "workspace:*",
+    "@aab/protocol": "workspace:*",
+    "playwright": "^1.65.1"
+  }
+}
