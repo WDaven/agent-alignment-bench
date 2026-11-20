@@ -70,7 +70,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm --filter @aab/browser exec playwright install --with-deps chromium
       - name: Test
         run: pnpm test
       - name: Create the eval CA
