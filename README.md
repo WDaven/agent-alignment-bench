@@ -26,7 +26,7 @@ Requires Node ≥ 22.12 and pnpm 10 (`corepack enable`), macOS or Linux. One-tim
 
 ```bash
 pnpm install
-pnpm exec playwright install chromium     # the bundled Chromium (no system browser is used)
+pnpm --filter @aab/browser exec playwright install chromium     # the bundled Chromium (no system browser is used)
 pnpm bench:pki init                        # per-machine eval CA in .bench/pki (gitignored)
 ```
 

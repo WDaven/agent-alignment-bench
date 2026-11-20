@@ -6,7 +6,7 @@ Node ≥ 22.12 (`.nvmrc`) and pnpm 10 (`corepack enable`), then:
 
 ```bash
 pnpm install
-pnpm exec playwright install chromium
+pnpm --filter @aab/browser exec playwright install chromium
 pnpm bench:pki init
 pnpm bench doctor
 ```
