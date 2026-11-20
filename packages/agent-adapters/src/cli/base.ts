@@ -1,8 +1,3 @@
-/**
- * Base class for adapters that run an agent CLI as a child process for one role of one episode.
- * Subclasses provide argv/env and a stream parser; the base enforces limits and kills the whole
- * process group on timeout / turn limit / stop().
- */
 import { mkdirSync, writeFileSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
 import type {
@@ -32,9 +27,7 @@ import {
 export interface StreamState {
   finalResponse: string | null;
   usage: ToolCost;
-  /** Tool uses seen (MCP + built-in): the turn counter. */
   toolUses: number;
-  /** Error reported by the CLI's own stream (auth failure, API error...). */
   streamError: string | null;
   modelVersion: string | null;
 }
@@ -45,7 +38,6 @@ export interface CliInvocation {
   secrets: string[];
 }
 
-/** The prompt every LLM CLI receives (identical across CLIs for fairness). */
 export function composePrompt(view: AgentEpisodeView): string {
   return `${HARNESS_SYSTEM_NOTE}\n\nUser task:\n${view.task}`;
 }
@@ -55,8 +47,6 @@ export abstract class CliAgentAdapter implements AgentAdapter {
   readonly capabilities: AdapterCapabilities = {
     browser: 'harness',
     search: 'harness',
-    // Built-in tools are disabled by flags; any that still appear in the stream are journaled
-    // as tool.call server `cli` and graded as `uncontrolled_tool_used`.
     otherTools: 'none',
     supportsDelegation: true,
   };
@@ -85,9 +75,7 @@ export abstract class CliAgentAdapter implements AgentAdapter {
     return this.opts.executable ?? this.defaultExecutable;
   }
 
-  /** Build argv + env for this episode (subclass). May write config files under tools.configHome. */
   protected abstract invocation(view: AgentEpisodeView, tools: AgentTools): CliInvocation;
-  /** Handle one stdout line (subclass). */
   protected abstract onLine(line: string): void;
 
   protected async detectVersion(): Promise<string | null> {
@@ -103,7 +91,6 @@ export abstract class CliAgentAdapter implements AgentAdapter {
     (this.info as { cliVersion: string | null }).cliVersion = await this.detectVersion();
   }
 
-  /** The exact invocation (argv + env NAMES) — for docs, tests and run metadata. */
   describeInvocation(
     view: AgentEpisodeView,
     tools: AgentTools,
@@ -147,9 +134,7 @@ export abstract class CliAgentAdapter implements AgentAdapter {
       onStdoutLine: (line) => {
         try {
           this.onLine(line);
-        } catch {
-          /* tolerate unparsable lines */
-        }
+        } catch {}
       },
       onStderrLine: (line) => {
         stderrTail.push(line);
@@ -161,9 +146,8 @@ export abstract class CliAgentAdapter implements AgentAdapter {
     const timer = setTimeout(() => this.proc?.kill('wall_clock'), wall);
     const exit = await this.proc.exited;
     clearTimeout(timer);
-    await new Promise((r) => setTimeout(r, 50)); // let readline flush the last lines
+    await new Promise((r) => setTimeout(r, 50));
     this.transcript?.end();
-    // Every tool use the CLI made (MCP + built-in); world actions are counted by the runner.
     this.state.usage.toolCalls = this.state.toolUses;
     const killed = this.proc.killReason;
     if (killed === 'wall_clock' || killed === 'max_turns')

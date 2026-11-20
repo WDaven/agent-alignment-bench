@@ -1,17 +1,4 @@
 #!/usr/bin/env node
-/**
- * `bench` — the benchmark CLI (pnpm bench:* scripts).
- *
- *   bench pki init|show|rotate
- *   bench up [--compose] | bench down [--compose]
- *   bench run (--scenario <id> | --suite <s>) --agent scripted|claude-code|codex
- *             [--model m] [--seed n] [--repetitions k] [--headed] [--auth inherit|api_key]
- *             [--no-browser] [--max-turns n] [--max-budget-usd x] [--plan compliant|probe] [--compose]
- *   bench grade --events runs/<id>/events.jsonl [--write]
- *   bench report --run <id> | --suite-dir <dir>
- *   bench test-graders
- *   bench doctor [--no-self-test]
- */
 import { spawnSync } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
@@ -50,7 +37,6 @@ const program = new Command('bench')
   .description('Agent Alignment Browser Benchmark harness')
   .showHelpAfterError();
 
-// ---------------------------------------------------------------- pki
 async function printPki(): Promise<void> {
   const ca = await loadCa(p.pki);
   const x = new X509Certificate(ca.certPem);
@@ -100,7 +86,6 @@ pki
     await printPki();
   });
 
-// ---------------------------------------------------------------- up / down
 program
   .command('up')
   .description('prepare the harness (local: PKI + dirs; --compose: docker compose up)')
@@ -115,7 +100,7 @@ program
     }
     out('Local mode needs no daemon: every `bench run` self-hosts a fresh world (agent API, site');
     out('host, admin API) and MITM proxy in its own process for each episode and tears them down');
-    out('afterwards (isolation: proxy-only). PKI is ready in ' + p.pki + '.');
+    out(`afterwards (isolation: proxy-only). PKI is ready in ${p.pki}.`);
     out('For hard isolation use: pnpm bench:up -- --compose');
   });
 program
@@ -134,7 +119,6 @@ program
     } else out('nothing to clean up');
   });
 
-// ---------------------------------------------------------------- run
 program
   .command('run')
   .description('run episodes and write runs/<runId>/')
@@ -154,7 +138,6 @@ program
   .action(async (o) => {
     if (o.compose) {
       const argv = process.argv.slice(process.argv.indexOf('run')).filter((a) => a !== '--compose');
-      // The runner image's entrypoint is `node apps/runner/dist/cli.js`; AAB_BACKEND=remote there.
       process.exitCode = compose(p, ['--profile', 'run', 'run', '--rm', 'runner', ...argv]);
       return;
     }
@@ -203,13 +186,11 @@ program
     }
     await backend?.close();
     if (results.length > 1) {
-      // Suite summary in a dedicated directory of links (runs stay in runs/<runId>/).
       const s = writeSuiteSummary(p.runs, `Runs (${results.length} new)`);
       out(`suite summary: ${s.file} (${s.runs} runs under ${p.runs})`);
     }
   });
 
-// ---------------------------------------------------------------- grade / report
 program
   .command('grade')
   .description('re-grade a run from its artifacts (events.jsonl + episode/world files)')
@@ -238,7 +219,6 @@ program
     } else throw new Error('give --run <id> or --suite-dir <dir>');
   });
 
-// ---------------------------------------------------------------- test-graders / doctor
 program
   .command('test-graders')
   .description('run the grader contract tests (crafted positive/negative traces, spec §12.11)')

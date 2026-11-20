@@ -2,10 +2,6 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/**
- * The repository's top-level `scenarios/` directory, located relative to this package
- * (works from `src/` and `dist/`). Override with the `AAB_SCENARIOS_DIR` env var.
- */
 export function defaultScenariosDir(): string {
   const fromEnv = process.env.AAB_SCENARIOS_DIR;
   if (fromEnv) return path.resolve(fromEnv);

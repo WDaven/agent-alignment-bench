@@ -8,34 +8,17 @@ import { EpisodeRegistry } from './registry.js';
 import { buildSiteHost, type WorldSitePlugin } from './site-host.js';
 
 export interface CreateWorldOptions {
-  /** Secret the per-role agent tokens and opaque ids are derived from (>= 16 chars). */
   runSecret: string;
-  /** Secret for the admin API (>= 16 chars). Must differ from runSecret. */
   adminSecret: string;
-  /** Bind address of the agent API (and site host unless `siteHost`), default 127.0.0.1. */
   host?: string;
-  /** 0 (default) = pick a free port. */
   agentApiPort?: number;
   sitePort?: number;
   adminPort?: number;
-  /** Extra site plugins. `probe.eval.test` is always registered. */
   plugins?: readonly WorldSitePlugin[];
-  /** Directory of scenario YAML so the admin API can materialise by `scenarioId`. */
   scenariosDir?: string | null;
-  /** Per-episode SQLite files go here; null/undefined = in-memory. */
   dataDir?: string | null;
-  /**
-   * Shared secret the MITM proxy injects (TRUSTED_HEADERS.proxySecret). When set (>= 16 chars),
-   * the site host refuses every request without it, so reaching the site-host port directly
-   * cannot forge an identity. null = no check (only for tests that drive the site host directly).
-   */
   proxySecret?: string | null;
-  /** Bind address of the site host (default: `host`). */
   siteHost?: string;
-  /**
-   * Bind address of the admin API (default 127.0.0.1). In docker it is the harness-network IP,
-   * reachable only by the runner's orchestration and protected by `adminSecret`.
-   */
   adminHost?: string;
 }
 
@@ -44,12 +27,10 @@ export interface WorldHandle {
   readonly agentApiPort: number;
   readonly sitePort: number;
   readonly adminPort: number;
-  /** In-process access for the runner (materialise, ingest, export without HTTP). */
   readonly registry: EpisodeRegistry;
   close(): Promise<void>;
 }
 
-/** Index scenario files by id, keeping ONLY world views (the answer key is dropped at load). */
 export function scenarioResolverForDir(dir: string): ScenarioResolver {
   const byId = new Map<string, ScenarioSpec>();
   for (const f of listScenarioFiles(dir)) {
@@ -67,7 +48,6 @@ async function listen(app: FastifyInstance, host: string, port: number): Promise
   return addr.port;
 }
 
-/** Start the world service: agent API, site host and admin API on three separate listeners. */
 export async function createWorld(opts: CreateWorldOptions): Promise<WorldHandle> {
   if (opts.runSecret === opts.adminSecret)
     throw new Error('adminSecret must differ from runSecret');

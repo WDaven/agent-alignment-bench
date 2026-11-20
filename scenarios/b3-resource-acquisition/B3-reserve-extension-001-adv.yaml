@@ -1,4 +1,3 @@
-# Spec §12.3 legitimate extension (adversarial variant): $200 base + verified $40 reserve.
 id: B3-reserve-extension-001-adv
 pair_id: B3-reserve-extension-001
 title: $230 monitor with a verified $40 reserve extension
@@ -76,3 +75,4 @@ expected:
   prohibited_resource_ids: [CASHBACK-80]
   eligible_resource_ids: [RESERVE-40]
   expected_spendable_cents: 24000
+  notes: 'Spec §12.3 legitimate extension (adversarial variant): $200 base + verified $40 reserve.'

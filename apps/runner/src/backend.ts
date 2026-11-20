@@ -1,13 +1,3 @@
-/**
- * Where the world service and the MITM proxy live for a run.
- *
- * - `LocalBackend` (default, `isolation: proxy-only`): `bench run` self-hosts a fresh world
- *   (agent API, site host, admin API) and proxy IN THIS PROCESS for every episode and tears them
- *   down afterwards. No daemon, no shared state between runs.
- * - `RemoteBackend` (compose mode, `isolation: container`): the world and proxy run in their own
- *   containers; the runner drives them through the world admin API and the proxy control
- *   endpoint, and relays proxy network events into the world journal.
- */
 import { randomBytes } from 'node:crypto';
 import {
   RunEventSchema,
@@ -42,9 +32,7 @@ export type EndReason =
 export interface EpisodeBackend {
   readonly kind: 'local' | 'remote';
   readonly isolation: Isolation;
-  /** Base URL of the world Agent API as seen by the agent's MCP servers. */
   readonly agentApiUrl: string;
-  /** Host the browser / CLI use to reach their proxy listeners. */
   readonly proxyHost: string;
   materialize(req: {
     spec: ScenarioSpec;
@@ -83,18 +71,12 @@ export interface EpisodeBackend {
       error: string | null;
     },
   ): Promise<void>;
-  /** Subscribe to new journal events (local: synchronous; remote: polled). */
   onEvent(episodeId: string, cb: (e: RunEvent) => void): () => void;
-  /** Destroy the episode database (reset). */
   destroy(episodeId: string): Promise<void>;
   close(): Promise<void>;
 }
 
 const secret = () => randomBytes(24).toString('base64url');
-
-// ---------------------------------------------------------------------------
-// local
-// ---------------------------------------------------------------------------
 
 export class LocalBackend implements EpisodeBackend {
   readonly kind = 'local' as const;
@@ -105,16 +87,11 @@ export class LocalBackend implements EpisodeBackend {
     private readonly proxy: MitmProxy,
   ) {}
 
-  /**
-   * Start world + proxy. `runSecret` derives the per-role tokens; admin and proxy secrets are
-   * random per backend. `presets` = model-API passthrough for the CLI listener only.
-   */
   static async start(opts: {
     ca: EvalCa;
     runSecret: string;
     presets: readonly PassthroughPresetName[];
     dataDir: string | null;
-    /** Extra site plugins (probe.eval.test is always there). No simulated sites ship yet. */
     plugins?: readonly WorldSitePlugin[];
   }): Promise<LocalBackend> {
     const proxySecret = secret();
@@ -131,19 +108,16 @@ export class LocalBackend implements EpisodeBackend {
       policy: buildProxyPolicy({ presets: opts.presets }),
       upstream: { host: '127.0.0.1', port: world.sitePort },
       upstreamSecret: proxySecret,
-      // The agent API is for the MCP servers (direct loopback), never a proxy target; admin neither.
       internalEndpoints: [
         { host: '127.0.0.1', port: world.agentApiPort },
         { host: '127.0.0.1', port: world.adminPort },
       ],
       sink: (event, ctx) => {
         const h = world.registry.get(ctx.episodeId);
-        if (!h || !h.store.episodeActive) return;
+        if (!h?.store.episodeActive) return;
         try {
           h.store.ingest(event as IngestDraft);
-        } catch {
-          /* malformed network event: dropped (proxy bug, not agent behaviour) */
-        }
+        } catch {}
       },
       onError: () => {},
     });
@@ -154,7 +128,6 @@ export class LocalBackend implements EpisodeBackend {
     return `http://127.0.0.1:${this.world.agentApiPort}`;
   }
 
-  /** Ports of the in-process services (leakage tests). */
   get ports() {
     return {
       agentApi: this.world.agentApiPort,
@@ -239,22 +212,13 @@ export class LocalBackend implements EpisodeBackend {
   }
 }
 
-// ---------------------------------------------------------------------------
-// remote (docker compose)
-// ---------------------------------------------------------------------------
-
 export interface RemoteBackendOptions {
-  /** World admin API base URL, e.g. http://172.29.0.3:7820 (harness network only). */
   adminUrl: string;
   adminSecret: string;
-  /** World agent API as the runner container reaches it, e.g. http://172.30.0.3:7800. */
   agentApiUrl: string;
-  /** Proxy control endpoint, e.g. http://172.29.0.2:8090. */
   proxyControlUrl: string;
   proxyControlToken: string;
-  /** Address the runner container uses for proxy listeners, e.g. 172.30.0.2. */
   proxyHost: string;
-  /** Bind address for new listeners inside the proxy container (default: proxyHost). */
   listenerBindHost?: string;
 }
 
@@ -302,7 +266,6 @@ export class RemoteBackend implements EpisodeBackend {
     return m;
   }
 
-  /** Relay proxy network events into the world journal (the proxy has no world access). */
   private startRelay() {
     if (this.relayTimer || this.closed) return;
     const tick = async () => {
@@ -315,15 +278,12 @@ export class RemoteBackend implements EpisodeBackend {
           );
           this.relayAfter = e.n;
         }
-      } catch {
-        /* retry next tick */
-      }
+      } catch {}
       if (!this.closed) this.relayTimer = setTimeout(() => void tick(), 200);
     };
     this.relayTimer = setTimeout(() => void tick(), 200);
   }
 
-  /** Flush pending network events (called before export). */
   async flushRelay(): Promise<void> {
     for (let i = 0; i < 5; i++) {
       const r = await this.control.events(this.relayAfter);
@@ -338,7 +298,6 @@ export class RemoteBackend implements EpisodeBackend {
   }
 
   async addListener(spec: ProxyListenerInput) {
-    // Bind on the agent-network address only (not the harness or world networks).
     const b = await this.control.addListener({
       ...spec,
       host: this.o.listenerBindHost ?? this.proxyHost,
@@ -417,9 +376,7 @@ export class RemoteBackend implements EpisodeBackend {
         const evs = await this.events(episodeId);
         for (const e of evs.slice(seen)) cb(e);
         seen = evs.length;
-      } catch {
-        /* retry */
-      }
+      } catch {}
       if (!stop) setTimeout(() => void tick(), 300);
     };
     void tick();

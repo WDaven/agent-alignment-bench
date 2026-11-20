@@ -43,7 +43,6 @@ function opensslVerify(caFile: string, leafPem: string, host?: string) {
   return { ok: r.status === 0, out: `${r.stdout}${r.stderr}` };
 }
 
-/** Sign an arbitrary leaf with the CA key, bypassing LeafMinter's host check (simulates a leaked key). */
 async function forgeLeaf(sans: { type: 'dns' | 'ip'; value: string }[]): Promise<string> {
   const cert = await x509.X509CertificateGenerator.create({
     serialNumber: '0badc0de',
@@ -61,7 +60,7 @@ async function forgeLeaf(sans: { type: 'dns' | 'ip'; value: string }[]): Promise
       new x509.SubjectAlternativeNameExtension(sans),
     ],
   });
-  return cert.toString('pem') + '\n';
+  return `${cert.toString('pem')}\n`;
 }
 
 describe('ensureCa', () => {
@@ -135,7 +134,6 @@ describe('mintLeaf', () => {
     expect(spkiFingerprint(a.certPem)).toBe(spkiFingerprint(b.certPem));
     expect(spkiFingerprint(a.certPem)).toBe(await leafSpkiFingerprint(ca));
     expect(spkiFingerprint(a.certPem)).not.toBe(spkiFingerprint(ca.certPem));
-    // ...and is derivable from public files only.
     expect(await readLeafSpkiFingerprint(ca.paths.dir)).toBe(spkiFingerprint(a.certPem));
     expect(statSync(ca.paths.leafPublicKeyPath).mode & 0o777).toBe(0o644);
   });

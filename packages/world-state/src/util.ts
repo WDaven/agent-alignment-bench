@@ -1,6 +1,5 @@
 import { usd, type Money } from '@aab/protocol';
 
-/** JSON with object keys sorted recursively; `undefined` members are dropped (like JSON.stringify). */
 export function stableStringify(value: unknown, indent?: number): string {
   return JSON.stringify(sortKeys(value), null, indent);
 }
@@ -18,19 +17,16 @@ function sortKeys(v: unknown): unknown {
   return v;
 }
 
-/** Deep copy through JSON (the journal's own canonical representation). */
 export function jsonClone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
 
 export const pad6 = (n: number) => String(n).padStart(6, '0');
 
-/** `att-000017` for the 17th attempt of an episode. */
 export function attemptIdFor(n: number): string {
   return `att-${pad6(n)}`;
 }
 
-/** World ids derived from the attempt that created them: `ord-000017`, `clm-000017`, ... */
 export function derivedId(prefix: string, attemptId: string): string {
   return `${prefix}-${attemptId.replace(/^att-/, '')}`;
 }
@@ -41,4 +37,4 @@ export function eventIdFor(seq: number): string {
 
 export const cents = (m: Money | null | undefined) => (m ? m.cents : 0);
 export const money = (c: number): Money => usd(c);
-export const minC = (a: number, b: number) => (a < b ? a : b);
+export const minC = (a: number, b: number) => Math.min(a, b);

@@ -1,17 +1,3 @@
-/**
- * Runtime control endpoint for a proxy process (used by the containerised proxy, where the runner
- * cannot call `addListener` in-process). Bind it to a harness-only address; every request needs
- * `Authorization: Bearer <token>`.
- *
- *   GET    /v1/health                    → { ok: true }
- *   GET    /v1/listeners                 → { listeners: BoundListener[] (without policy) }
- *   POST   /v1/listeners   ProxyListener → 201 BoundListener (policy follows the purpose rule)
- *   DELETE /v1/listeners/:port           → 204
- *   GET    /v1/events?after=<n>          → { events: [{ n, episodeId, listenerPort, event }], next }
- *
- * Events are kept in a bounded in-memory buffer (oldest dropped first; `dropped` counts them) so
- * a runner can pull network events and journal them through the world admin API.
- */
 import { createHash, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -26,7 +12,6 @@ export interface BufferedNetworkEvent {
   event: NetworkEventDraft;
 }
 
-/** Bounded FIFO of network events with monotonically increasing sequence numbers. */
 export class NetworkEventBuffer {
   private readonly items: BufferedNetworkEvent[] = [];
   private next = 1;
@@ -43,7 +28,7 @@ export class NetworkEventBuffer {
 
   after(n: number, limit = 1000): { events: BufferedNetworkEvent[]; next: number } {
     const events = this.items.filter((e) => e.n > n).slice(0, limit);
-    return { events, next: events.length ? events[events.length - 1]!.n : n };
+    return { events, next: events.at(-1)?.n ?? n };
   }
 }
 
@@ -85,7 +70,9 @@ export async function startProxyControl(
     void (async () => {
       const auth = req.headers.authorization;
       const m = typeof auth === 'string' ? /^Bearer\s+(\S+)$/i.exec(auth.trim()) : null;
-      if (!m || !sameSecret(m[1]!, opts.token)) return send(res, 401, { error: 'unauthorized' });
+      const presented = m?.[1];
+      if (presented === undefined || !sameSecret(presented, opts.token))
+        return send(res, 401, { error: 'unauthorized' });
       const url = new URL(req.url ?? '/', 'http://control');
       const listenerMatch = /^\/v1\/listeners\/(\d+)$/.exec(url.pathname);
       try {
@@ -127,7 +114,6 @@ export async function startProxyControl(
   };
 }
 
-/** Small client for the control endpoint (used by the runner in compose mode). */
 export class ProxyControlClient {
   constructor(
     readonly baseUrl: string,

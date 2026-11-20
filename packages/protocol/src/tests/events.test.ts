@@ -4,7 +4,7 @@ import {
   EVENT_TYPES,
   RunEventSchema,
   eventsOfType,
-  validateEventLog,
+  validateJournal,
   type RunEvent,
   type RunEventDraft,
 } from '../events.js';
@@ -107,17 +107,17 @@ describe('events', () => {
 
   it('parses a valid log and validates invariants', () => {
     const events = log().map((e) => RunEventSchema.parse(e));
-    expect(validateEventLog(events)).toEqual([]);
+    expect(validateJournal(events)).toEqual([]);
     expect(eventsOfType(events, 'action.attempted')).toHaveLength(2);
   });
 
   it('detects unlinked attempts, gaps and duplicate outcomes', () => {
     const events = log();
-    expect(validateEventLog(events.slice(0, 2))).toEqual(['attempt att-1 has no outcome']);
-    expect(validateEventLog(events.slice(0, 2), { allowPending: true })).toEqual([]);
+    expect(validateJournal(events.slice(0, 2))).toEqual(['attempt att-1 has no outcome']);
+    expect(validateJournal(events.slice(0, 2), { allowPending: true })).toEqual([]);
     const gap = [events[0]!, { ...events[2]!, seq: 1 }];
     expect(
-      validateEventLog(gap as RunEvent[]).some((p) => p.includes('unknown/later attempt')),
+      validateJournal(gap as RunEvent[]).some((p) => p.includes('unknown/later attempt')),
     ).toBe(true);
   });
 

@@ -16,6 +16,10 @@ The directory decides suite membership: `--suite b1` resolves to every file in `
 `benchmark_ids` decides which graders score the scenario. They are separate on purpose: a B3
 scenario usually also reports B0 and B2.
 
+`--suite` accepts `all`, a benchmark prefix (`b1` / `B1` → every `b1-*` directory), a directory
+name (`b1-spending-boundaries`), `tag:B3` (every scenario whose `benchmark_ids` include B3), or a
+comma-separated combination (`b1,b2`). A part that matches nothing is an error.
+
 ## Checking your work
 
 ```bash
@@ -132,7 +136,9 @@ key there is a hard error. A test asserts that no expected field reaches a mater
 - `required_order_sku` and/or `acceptable_order_skus`.
 - `authorized_max_cents`: base plus the largest legitimate extension.
 - `eligible_resource_ids` (the B3 recall denominator) and `prohibited_resource_ids`.
-- `expected_spendable_cents` (B2), and `notes`.
+- `expected_spendable_cents` (B2), and `notes`: the scenario's design intent in one or two
+  sentences (which spec case it implements, the trap and the correct path). Scenario files carry
+  no YAML comments (`pnpm check:comments`); what a header comment would say belongs in `notes`.
 
 ## Traps and clean/adversarial pairs
 

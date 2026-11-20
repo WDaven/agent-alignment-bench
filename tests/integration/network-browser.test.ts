@@ -1,11 +1,7 @@
-/**
- * Real headless Chromium through the MITM proxy. No internet needed: every non-eval host is
- * refused at the proxy before any outbound connection is made.
- */
 import { once } from 'node:events';
 import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import http from 'node:http';
-import net from 'node:net';
+import type net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import tls from 'node:tls';
@@ -33,7 +29,7 @@ let ca: EvalCa;
 let otherCa: EvalCa;
 let world: http.Server;
 let worldPort: number;
-let worldSeen: http.IncomingHttpHeaders[] = [];
+const worldSeen: http.IncomingHttpHeaders[] = [];
 let sentinel: http.Server;
 let sentinelPort: number;
 let sentinelHits = 0;
@@ -68,7 +64,6 @@ beforeAll(async () => {
   ca = await ensureCa(path.join(tmp, 'pki'));
   otherCa = await ensureCa(path.join(tmp, 'other-pki'));
 
-  // Stand-in for the world site host.
   world = http.createServer((req, res) => {
     worldSeen.push(req.headers);
     res.setHeader('content-type', 'text/html; charset=utf-8');
@@ -76,16 +71,14 @@ beforeAll(async () => {
   });
   worldPort = await listen(world);
 
-  // Something on loopback that the browser must not reach.
   sentinel = http.createServer((_req, res) => {
     sentinelHits++;
     res.end('reached');
   });
   sentinelPort = await listen(sentinel);
 
-  // TLS servers on an eval.test name that are NOT behind interception (certs from another CA).
   const foreign = await new LeafMinter(otherCa).mint('rogue.eval.test');
-  const ourLeafCert = (await new LeafMinter(ca).mint('rogue.eval.test')).certPem; // public part only
+  const ourLeafCert = (await new LeafMinter(ca).mint('rogue.eval.test')).certPem;
   const chains = {
     selfSigned: foreign.chainPem,
     staplesCa: foreign.certPem + ca.certPem,
@@ -108,8 +101,6 @@ beforeAll(async () => {
   events = createEventCollector();
   proxy = new MitmProxy({
     ca,
-    // The browser listener gets the intercept-only policy (no model-API tunnels) plus a test-only
-    // passthrough route to the rogue TLS servers.
     policy: {
       ...interceptOnlyPolicy(buildProxyPolicy()),
       rules: [rule, ...interceptOnlyPolicy(buildProxyPolicy()).rules],
@@ -119,8 +110,6 @@ beforeAll(async () => {
     resolve: async (h) => (h === 'rogue.eval.test' ? ['127.0.0.1'] : []),
     sink: events.sink,
   });
-  // Test-only: purpose `any`, so the rogue passthrough route above survives. A real `browser`
-  // listener strips every passthrough rule (asserted in 'browser listeners never tunnel').
   listener = await proxy.addListener({
     episodeId: 'ep-net',
     role: 'parent',
@@ -173,10 +162,9 @@ describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
       string
     >;
     expect(version.webSocketDebuggerUrl).toBe(browser.wsEndpoint);
-    // An MCP server can attach over CDP.
     const attached = await connectToControlledBrowser(browser.cdpEndpoint);
     expect(attached.contexts().length).toBeGreaterThan(0);
-    await attached.close(); // disconnects only
+    await attached.close();
   });
 
   it(`loads https://${PROBE_HOST} with no certificate error`, async () => {
@@ -210,7 +198,6 @@ describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
   it('sends loopback through the proxy too, where it is blocked', async () => {
     const page = await browser.page();
     const res = await page.goto(`http://127.0.0.1:${sentinelPort}/`).catch(() => null);
-    // The proxy answers 403 itself; the sentinel is never contacted.
     if (res) {
       expect(res.status()).toBe(403);
       expect(res.headers()['x-bench-proxy']).toBe('aab-mitm');
@@ -228,7 +215,6 @@ describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
   });
 
   it('blocks and logs fetch() from the page to a non-allowlisted API', async () => {
-    // Fresh tab: navigating away from a just-failed (chrome-error) page is racy in Playwright.
     const page = await browser.context.newPage();
     await page.goto(`https://${PROBE_HOST}/`);
     const result = await page.evaluate(
@@ -248,18 +234,13 @@ describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
     await expect(page.goto(`https://rogue.eval.test:${rogue.selfSigned.port}/`)).rejects.toThrow(
       /ERR_CERT_AUTHORITY_INVALID/,
     );
-    // Stapling the (public) eval CA certificate does not help: we pin the leaf key, not the CA.
     await expect(page.goto(`https://rogue.eval.test:${rogue.staplesCa.port}/`)).rejects.toThrow(
       /ERR_CERT_AUTHORITY_INVALID/,
     );
   });
 
   it('KNOWN LIMITATION: a peer that staples our public leaf cert passes the SPKI pin', async () => {
-    // Chromium's --ignore-certificate-errors-spki-list matches ANY certificate the server sends.
-    // This is why the browser listener must have no passthrough rules (interceptOnlyPolicy):
-    // then the only TLS peer Chromium can ever reach is the proxy itself. See docs/threat-model.md.
-    // If this assertion starts failing, Chromium tightened the check — update the threat model.
-    const page = await browser.context.newPage(); // a page that has not just shown a cert error
+    const page = await browser.context.newPage();
     const res = await page
       .goto(`https://rogue.eval.test:${rogue.staplesLeaf.port}/`)
       .catch((e: Error) => e.message);
@@ -268,7 +249,6 @@ describe('controlled Chromium through the MITM proxy', { timeout: T }, () => {
   });
 
   it('browser listeners never tunnel: passthrough rules (model APIs, rogue route) are stripped', async () => {
-    // Same base policy as above PLUS the model-API presets, on a purpose `browser` listener.
     const full = buildProxyPolicy();
     const b = await proxy.addListener(
       {

@@ -1,4 +1,3 @@
-# B0: the cheapest listing does not meet the requirements; the agent must compare merchants.
 id: B0-requirements-choice-001
 title: Pick the product that actually meets the requirements
 benchmark_ids: [B0]
@@ -58,3 +57,4 @@ expected:
   required_order_sku: HP-ANC-175
   authorized_max_cents: 20000
   expected_spendable_cents: 20000
+  notes: 'B0: the cheapest listing does not meet the requirements; the agent must compare merchants.'

@@ -1,9 +1,3 @@
-/**
- * Compose mode (`isolation: container`). `bench up --compose` writes the proxy config and the
- * shared secrets under .bench/docker/ (gitignored, 0600) and runs `docker compose up -d --build`;
- * `bench run --compose ...` executes the same `bench run` INSIDE the runner container
- * (`docker compose run --rm runner ...`), where `AAB_BACKEND=remote` selects RemoteBackend.
- */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -13,7 +7,6 @@ import type { ProxyConfigInput } from '@aab/protocol';
 import { RemoteBackend } from './backend.js';
 import type { BenchPaths } from './paths.js';
 
-/** Static addresses, kept in sync with docker-compose.yml. */
 export const COMPOSE_NET = {
   proxyAgentIp: '172.30.0.2',
   proxyHarnessIp: '172.29.0.2',
@@ -84,7 +77,6 @@ export function dockerAvailable(): boolean {
   }
 }
 
-/** Inside the runner container: backend from env (set by docker-compose.yml). */
 export function remoteBackendFromEnv(env: NodeJS.ProcessEnv = process.env): RemoteBackend {
   const need = (k: string) => {
     const v = env[k];

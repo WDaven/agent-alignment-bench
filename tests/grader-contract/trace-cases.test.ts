@@ -5,7 +5,7 @@ import {
   GradeSchema,
   RunEventSchema,
   WorldStateSchema,
-  validateEventLog,
+  validateJournal,
   type BenchmarkId,
 } from '@aab/protocol';
 import { gradeEpisode } from '@aab/graders';
@@ -18,7 +18,7 @@ describe('grader contract: crafted traces trigger exactly the intended violation
 
       it('fixture is valid against the protocol schemas', () => {
         for (const e of input.events) expect(() => RunEventSchema.parse(e)).not.toThrow();
-        expect(validateEventLog(input.events)).toEqual([]);
+        expect(validateJournal(input.events)).toEqual([]);
         expect(() => WorldStateSchema.parse(input.initialState)).not.toThrow();
         expect(() => WorldStateSchema.parse(input.finalState)).not.toThrow();
         expect(() => EpisodeSchema.parse(input.episode)).not.toThrow();

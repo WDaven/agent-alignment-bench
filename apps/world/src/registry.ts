@@ -12,7 +12,6 @@ import { deriveRoleToken, materialize, type MaterializedEpisode } from '@aab/sce
 import { WorldStore } from '@aab/world-state';
 
 export interface MaterializeRequest {
-  /** World view of a scenario. Validated strictly: an `expected` key is rejected. */
   spec: ScenarioSpec;
   seed?: number;
   runId?: string;
@@ -32,10 +31,6 @@ export interface Identity {
   delegationId: string | null;
 }
 
-/**
- * All live episodes of this world process, plus the bearer-token index. The registry only ever
- * receives `ScenarioSpec`s (the world view); it has no field or parameter for `expected`.
- */
 export class EpisodeRegistry {
   private readonly episodes = new Map<string, EpisodeHandle>();
   private readonly tokens = new Map<string, Identity>();
@@ -43,11 +38,8 @@ export class EpisodeRegistry {
   constructor(
     private readonly opts: {
       runSecret: string;
-      /** Directory for per-episode SQLite files; null = in-memory databases. */
       dataDir: string | null;
-      /** Hosts served by registered site plugins (browse reports them as existing). */
       knownHosts: readonly string[];
-      /** Shared secret the proxy sends in TRUSTED_HEADERS.proxySecret; null = not required. */
       proxySecret?: string | null;
     },
   ) {
@@ -55,7 +47,6 @@ export class EpisodeRegistry {
       throw new Error('runSecret must be at least 16 characters');
   }
 
-  /** Secret required on site-host requests (TRUSTED_HEADERS.proxySecret), or null. */
   get proxySecret(): string | null {
     return this.opts.proxySecret ?? null;
   }
@@ -102,7 +93,6 @@ export class EpisodeRegistry {
     return [...this.episodes.keys()].sort();
   }
 
-  /** Destroy the database and re-materialise with the same spec, seed and ids. */
   reset(episodeId: string): EpisodeHandle {
     const h = this.require(episodeId);
     this.destroy(episodeId);
@@ -123,7 +113,6 @@ export class EpisodeRegistry {
     for (const [t, id] of this.tokens) if (id.episodeId === episodeId) this.tokens.delete(t);
   }
 
-  /** Token for a child agent bound to one delegation (role = the delegation's child role). */
   delegationToken(
     episodeId: string,
     delegationId: string,
@@ -133,7 +122,9 @@ export class EpisodeRegistry {
     if (!d) throw new NotFoundError(`no delegation ${delegationId}`);
     const token = deriveRoleToken(this.opts.runSecret, episodeId, d.childRole, delegationId);
     this.tokens.set(token, { episodeId, role: d.childRole, delegationId });
-    return { token, view: this.viewFor({ episodeId, role: d.childRole, delegationId })! };
+    const view = this.viewFor({ episodeId, role: d.childRole, delegationId });
+    if (!view) throw new NotFoundError(`no view for delegation ${delegationId}`);
+    return { token, view };
   }
 
   authenticate(token: string): (Identity & { handle: EpisodeHandle }) | null {
@@ -143,7 +134,6 @@ export class EpisodeRegistry {
     return handle ? { ...id, handle } : null;
   }
 
-  /** What an agent is told about itself. Never includes seed, variant, scenario id or expected values. */
   viewFor(id: Identity): AgentEpisodeView | null {
     const h = this.episodes.get(id.episodeId);
     if (!h) return null;
@@ -160,10 +150,7 @@ export class EpisodeRegistry {
   }
 
   closeAll(): void {
-    for (const id of this.ids()) {
-      const h = this.episodes.get(id)!;
-      h.store.close();
-    }
+    for (const id of this.ids()) this.episodes.get(id)?.store.close();
     this.episodes.clear();
     this.tokens.clear();
   }

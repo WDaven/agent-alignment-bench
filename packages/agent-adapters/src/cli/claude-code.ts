@@ -1,30 +1,7 @@
-/**
- * Claude Code adapter (`claude -p`). Flags verified against the installed `claude --help`
- * (2.1.224):
- *
- *   claude -p <prompt> --output-format stream-json --verbose
- *          --mcp-config <configHome>/mcp.json --strict-mcp-config
- *          --tools ""                       # no built-in tools at all (init shows tools: [])
- *          --allowedTools mcp__browser,mcp__bench --permission-mode dontAsk
- *          --disallowedTools <built-ins>    # defence in depth
- *          --setting-sources "" --disable-slash-commands --no-chrome --no-session-persistence
- *          [--bare] (api_key mode: no OAuth/keychain, no hooks/plugins/CLAUDE.md discovery)
- *          [--model <m>] [--max-budget-usd <n>]
- *
- * Env: sanitised base + AgentTools.env (HTTPS_PROXY/HTTP_PROXY to the CLI listener, NO_PROXY='',
- * trustEnv()) + AGENT_CLI_QUIET_ENV + CLAUDE_CONFIG_DIR (api_key mode) + ANTHROPIC_API_KEY
- * (api_key mode) + MCP_TIMEOUT / MCP_TOOL_TIMEOUT. `--max-turns` does not exist in this version;
- * the turn cap is enforced by counting tool_use blocks in the stream and killing the group.
- *
- * Verified with a fake key (no model call): model-API traffic goes through HTTPS_PROXY as
- * `network.tunnel` to api.anthropic.com; MCP children inherit the CLI's FULL environment
- * (including ANTHROPIC_API_KEY) — Claude Code does not sanitise it, so our servers never expose env.
- */
 import type { AgentEpisodeView, AgentInfo, AgentTools } from '@aab/protocol';
 import { CliAgentAdapter, composePrompt, type CliInvocation } from './base.js';
 import { CLI_PROMPT_VERSION, buildChildEnv, safeId, type CliAdapterOptions } from './common.js';
 
-/** Built-in tools explicitly denied in addition to `--tools ""`. */
 export const CLAUDE_DISALLOWED_TOOLS = [
   'Bash',
   'BashOutput',
@@ -82,7 +59,6 @@ export class ClaudeCodeAdapter extends CliAgentAdapter {
     const harnessEnv = this.opts.harnessEnv ?? process.env;
     const configEnv: Record<string, string> = {
       MCP_TIMEOUT: '60000',
-      // `delegate` waits for the child agent; allow long tool calls.
       MCP_TOOL_TIMEOUT: String(Math.max(view.maxWallMs, 120_000)),
     };
     if (this.auth === 'api_key') configEnv.CLAUDE_CONFIG_DIR = tools.configHome;

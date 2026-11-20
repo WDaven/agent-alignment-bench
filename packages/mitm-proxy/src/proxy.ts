@@ -32,19 +32,12 @@ export interface HostPort {
 }
 
 export interface ProxyTimeouts {
-  /** Max time to receive request headers (outer + intercepted). Default 30 s. */
   headersMs: number;
-  /** Max time for a whole intercepted/plain request. Default 120 s. */
   requestMs: number;
-  /** Inner TLS handshake deadline after CONNECT 200. Default 10 s. */
   handshakeMs: number;
-  /** Connect deadline for passthrough targets and the world upstream. Default 10 s. */
   connectMs: number;
-  /** Idle timeout of passthrough tunnels (model streams can pause). Default 10 min. */
   tunnelIdleMs: number;
-  /** Idle timeout on intercepted keep-alive connections. Default 30 s. */
   keepAliveMs: number;
-  /** Upstream response deadline (no bytes for this long → 504). Default 120 s. */
   upstreamMs: number;
 }
 
@@ -60,62 +53,34 @@ export const DEFAULT_TIMEOUTS: ProxyTimeouts = {
 
 export interface MitmProxyOptions {
   ca: EvalCa;
-  /** Reuse a minter (shared leaf cache). Default: a new one for `ca`. */
   minter?: LeafMinter;
-  /** Default policy for every listener (validated with ProxyPolicySchema). */
   policy: ProxyPolicy;
-  /** World site-host listener (plain HTTP) that receives intercepted *.eval.test traffic. */
   upstream: HostPort;
-  /**
-   * Shared secret sent to the site host in TRUSTED_HEADERS.proxySecret on every forwarded
-   * request (the site host refuses requests without it). Client copies are stripped like any
-   * other `x-bench-*` header. null/undefined = not sent.
-   */
   upstreamSecret?: string | null;
-  /** Never reachable (world admin API, agent API...). Checked against names AND resolved IPs. */
   internalEndpoints?: HostPort[];
-  /**
-   * IP addresses (or names) that may be reached even though they are IP literals or resolve to
-   * private/loopback space. Empty by default. `port: null` = any port. Never overrides
-   * `internalEndpoints`.
-   */
   allowedAddresses?: { host: string; port: number | null }[];
-  /** DNS for passthrough targets (default: `dns.lookup(all)`). Tests use it to map names to 127.0.0.1. */
   resolve?: (host: string) => Promise<string[]>;
   sink: NetworkEventSink;
   timeouts?: Partial<ProxyTimeouts>;
-  /** Max request header bytes (outer and intercepted). Default 16 KiB. */
   maxHeaderSize?: number;
-  /** Diagnostics for unexpected internal errors (never request-level noise). */
   onError?: (err: unknown, where: string) => void;
 }
 
 export interface AddListenerOptions {
-  /**
-   * Per-listener policy override. For a `browser` listener every passthrough rule is removed
-   * from whatever policy applies (security requirement, docs/threat-model.md).
-   */
   policy?: ProxyPolicy;
-  /**
-   * Overrides `spec.purpose` when the spec says `any` (kept for callers that predate
-   * ProxyListener.purpose). (episode, role, delegation, purpose) must be unique.
-   */
   purpose?: ListenerPurpose;
 }
 
 export interface BoundListener {
   spec: Readonly<ProxyListener>;
   purpose: ListenerPurpose;
-  /** Effective policy of this listener (browser: intercept-only). */
   policy: ProxyPolicy;
   host: string;
   port: number;
-  /** `http://host:port` — value for HTTPS_PROXY / --proxy-server. */
   url: string;
 }
 
 interface ListenerState extends BoundListener {
-  /** Deterministic per-listener counters for request / tunnel ids. */
   counters: { req: number; tun: number };
   outer: http.Server;
   inner: http.Server;
@@ -125,7 +90,6 @@ interface ListenerState extends BoundListener {
 
 interface InterceptMeta {
   state: ListenerState;
-  /** CONNECT authority (policy-checked). */
   host: string;
   port: number;
   scheme: 'https' | 'http';
@@ -179,7 +143,6 @@ function defaultPort(scheme: 'http' | 'https'): number {
   return scheme === 'https' ? 443 : 80;
 }
 
-/** Wrap a socket whose first bytes were already consumed so TLSSocket sees them (JS stream path). */
 function withPrefix(socket: net.Socket, head: Buffer): Duplex {
   const d = new Duplex({
     read() {
@@ -207,16 +170,6 @@ function withPrefix(socket: net.Socket, head: Buffer): Duplex {
   return d;
 }
 
-/**
- * HTTP/CONNECT forward proxy. One listener per (episode, role[, purpose]); see docs/threat-model.md.
- *
- * - `intercept` (only *.eval.test): TLS terminated with a minted leaf (SNI must equal the CONNECT
- *   host), HTTP/1.1 only (ALPN offers `http/1.1`; clients fall back from h2), inner `Host` must
- *   equal the CONNECT authority, client `x-bench-*` stripped, trusted headers injected, forwarded
- *   to `upstream` with the original Host. WebSocket upgrades are relayed.
- * - `passthrough`: blind TCP tunnel to the resolved address; never decrypted.
- * - everything else: 403 + `network.denied`.
- */
 export class MitmProxy {
   readonly ca: EvalCa;
   readonly minter: LeafMinter;
@@ -250,7 +203,6 @@ export class MitmProxy {
     }));
   }
 
-  /** Bind a listener for one (episode, role, purpose). Resolves once listening. */
   async addListener(
     spec: ProxyListenerInput,
     opts: AddListenerOptions = {},
@@ -273,8 +225,6 @@ export class MitmProxy {
       }
     }
     const base = opts.policy ? ProxyPolicySchema.parse(opts.policy) : this.policy;
-    // Chromium's SPKI pin accepts any peer stapling our public leaf, so a browser listener must
-    // never have a passthrough rule: its only TLS peer is then the proxy itself.
     const policy = purpose === 'browser' ? interceptOnlyPolicy(base) : base;
     const maxHeaderSize = this.opts.maxHeaderSize ?? 16 * 1024;
     const t = this.timeouts;
@@ -340,7 +290,6 @@ export class MitmProxy {
     };
   }
 
-  /** Close one listener and destroy its open connections/tunnels. */
   async removeListener(port: number): Promise<void> {
     const s = this.listeners.get(port);
     if (!s) return;
@@ -348,7 +297,6 @@ export class MitmProxy {
     await this.shutdown(s);
   }
 
-  /** Graceful close: stop accepting, destroy every open tunnel/connection, wait for servers. */
   async close(): Promise<void> {
     this.closing = true;
     const all = [...this.listeners.values()];
@@ -365,22 +313,16 @@ export class MitmProxy {
     await closed;
   }
 
-  // -------------------------------------------------------------------------
-  // helpers
-  // -------------------------------------------------------------------------
-
   private track(state: ListenerState, s: Duplex): void {
     state.sockets.add(s);
     s.once('close', () => state.sockets.delete(s));
-    s.on('error', () => {}); // errors are handled where they matter; never crash the proxy
+    s.on('error', () => {});
   }
 
   private report(err: unknown, where: string): void {
     try {
       this.opts.onError?.(err, where);
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   }
 
   private emit(state: ListenerState, event: NetworkEventDraft): void {
@@ -391,7 +333,6 @@ export class MitmProxy {
     }
   }
 
-  /** `req-<role>[-<delegation>]-<purpose>-<n>`: deterministic for identical traffic. */
   private nextId(state: ListenerState, kind: 'req' | 'tun'): string {
     state.counters[kind] += 1;
     const who = state.spec.delegationId
@@ -423,10 +364,6 @@ export class MitmProxy {
     });
   }
 
-  /**
-   * Pre-policy checks on the target + policy. Hosts are already normalised.
-   * Order: internal endpoint → localhost names → IP literals → policy rules.
-   */
   private evaluate(
     state: ListenerState,
     host: string,
@@ -437,7 +374,6 @@ export class MitmProxy {
       return { action: 'deny', reason: 'internal_endpoint', rule: null };
     }
     if (sameEndpoint(this.opts.upstream, { host, port })) {
-      // The world site host is reachable only *through* interception, never as a target.
       return { action: 'deny', reason: 'internal_endpoint', rule: null };
     }
     const explicitlyAllowed = this.isAllowedAddress(host, port);
@@ -459,10 +395,6 @@ export class MitmProxy {
       (a) => normalizeHost(a.host) === host && (a.port === null || a.port === port),
     );
   }
-
-  // -------------------------------------------------------------------------
-  // plain HTTP (absolute-form)
-  // -------------------------------------------------------------------------
 
   private onPlainRequest(
     state: ListenerState,
@@ -496,7 +428,6 @@ export class MitmProxy {
     this.forward(state, { host, port, scheme: 'http' }, req, res, url.pathname + url.search);
   }
 
-  /** Validate an absolute-form request target and its Host header; emits denials. */
   private plainTarget(
     state: ListenerState,
     req: http.IncomingMessage,
@@ -516,7 +447,6 @@ export class MitmProxy {
         refererOf(req.headers),
       );
     if (!url) {
-      // origin-form sent straight to the proxy, or garbage
       deny(hostHeader || state.host, null, 'malformed_request');
       return null;
     }
@@ -577,10 +507,6 @@ export class MitmProxy {
       target.url.pathname + target.url.search,
     );
   }
-
-  // -------------------------------------------------------------------------
-  // CONNECT
-  // -------------------------------------------------------------------------
 
   private onConnect(
     state: ListenerState,
@@ -673,7 +599,6 @@ export class MitmProxy {
       finish();
       return;
     }
-    // DNS-rebinding guard: the *resolved* address must not be internal/private (unless allowed).
     const address = addresses[0];
     const internal = (this.opts.internalEndpoints ?? []).some((e) =>
       addresses.some((ip) => sameEndpoint(e, { host: ip, port: target.port })),
@@ -713,7 +638,6 @@ export class MitmProxy {
     upstream.once('error', () => {
       failed = true;
       if (!connected) {
-        // Client is still waiting for the CONNECT response.
         clearTimeout(connectTimer);
         upstream.destroy();
         client.end(rawResponse(502, 'upstream connect failed\n'));
@@ -767,7 +691,6 @@ export class MitmProxy {
     const tlsSocket = new tls.TLSSocket(transport as net.Socket, {
       isServer: true,
       secureContext: ctx,
-      // HTTP/1.1 only: we never speak h2 to clients (they fall back via ALPN).
       ALPNProtocols: ['http/1.1'],
       SNICallback: (servername, cb) => {
         const sni = normalizeHost(servername);
@@ -803,7 +726,6 @@ export class MitmProxy {
           reason: 'sni_mismatch',
         });
       } else if (looksLikePlaintext(err)) {
-        // Non-TLS bytes inside a CONNECT to an intercept host.
         this.emitDenied(state, {
           host: target.host,
           port: target.port,
@@ -817,15 +739,9 @@ export class MitmProxy {
       client.destroy();
     });
     client.once('close', () => tlsSocket.destroy());
-    // Hand the decrypted stream to the per-listener HTTP/1.1 parser.
     state.inner.emit('connection', tlsSocket);
   }
 
-  // -------------------------------------------------------------------------
-  // intercepted HTTP (inside TLS)
-  // -------------------------------------------------------------------------
-
-  /** Inner Host must equal the CONNECT authority; policy is re-checked. Returns meta or null. */
   private checkInner(
     req: http.IncomingMessage,
   ):
@@ -1023,7 +939,7 @@ export class MitmProxy {
     req.on('data', (d: Buffer) => (bytesIn += d.length));
     req.pipe(up);
     res.on('close', () => {
-      if (!res.writableFinished) up.destroy(); // client aborted
+      if (!res.writableFinished) up.destroy();
       finish();
     });
   }
@@ -1036,7 +952,6 @@ export class MitmProxy {
     head: Buffer,
     path: string,
   ): void {
-    // Hold client bytes until the upstream has switched protocols (else they are dropped).
     socket.pause();
     const requestId = this.nextId(state, 'req');
     const proto = String(req.headers.upgrade ?? '').toLowerCase();
@@ -1097,16 +1012,14 @@ export class MitmProxy {
     });
     up.on('timeout', () => up.destroy(new Error('timeout')));
     up.on('response', (ures) => {
-      // Upstream refused the upgrade: relay its response verbatim-ish and close.
       status = ures.statusCode ?? 502;
       const lines = [`HTTP/1.1 ${status} ${ures.statusMessage ?? ''}`];
-      for (let i = 0; i < ures.rawHeaders.length; i += 2) {
-        const k = ures.rawHeaders[i]!;
+      for (const [k, v] of headerPairs(ures.rawHeaders)) {
         if (HOP_BY_HOP.has(k.toLowerCase())) continue;
-        lines.push(`${k}: ${ures.rawHeaders[i + 1]!}`);
+        lines.push(`${k}: ${v}`);
       }
       lines.push('connection: close');
-      socket.write(lines.join('\r\n') + '\r\n\r\n');
+      socket.write(`${lines.join('\r\n')}\r\n\r\n`);
       ures.on('data', (d: Buffer) => {
         bytesOut += d.length;
         socket.write(d);
@@ -1120,10 +1033,8 @@ export class MitmProxy {
       usock.setTimeout(0);
       this.track(state, usock);
       const lines = [`HTTP/1.1 ${status} ${ures.statusMessage ?? 'Switching Protocols'}`];
-      for (let i = 0; i < ures.rawHeaders.length; i += 2) {
-        lines.push(`${ures.rawHeaders[i]!}: ${ures.rawHeaders[i + 1]!}`);
-      }
-      socket.write(lines.join('\r\n') + '\r\n\r\n');
+      for (const [k, v] of headerPairs(ures.rawHeaders)) lines.push(`${k}: ${v}`);
+      socket.write(`${lines.join('\r\n')}\r\n\r\n`);
       if (uhead.length) {
         bytesOut += uhead.length;
         socket.write(uhead);
@@ -1138,7 +1049,6 @@ export class MitmProxy {
         usock.destroy();
         finish();
       };
-      // No half-open WebSockets: either side ending tears down both.
       socket.once('end', close);
       usock.once('end', close);
       socket.once('close', close);
@@ -1197,7 +1107,16 @@ function sameEndpoint(a: HostPort, b: HostPort): boolean {
   const hb = normalizeHost(b.host) ?? b.host.toLowerCase();
   if (a.port !== b.port) return false;
   if (ha === hb) return true;
-  // treat all loopback spellings as one
   const loop = (h: string) => h === 'localhost' || h === '::1' || /^127\./.test(h);
   return loop(ha) && loop(hb);
+}
+
+function headerPairs(raw: readonly string[]): [string, string][] {
+  const pairs: [string, string][] = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const name = raw[i];
+    const value = raw[i + 1];
+    if (name !== undefined && value !== undefined) pairs.push([name, value]);
+  }
+  return pairs;
 }

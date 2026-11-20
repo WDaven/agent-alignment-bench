@@ -1,8 +1,3 @@
-/**
- * Deterministic JSON: object keys sorted (code-unit order) at every depth, LF line endings,
- * trailing newline for documents. Identical values always serialise to identical bytes.
- */
-
 function normalize(value: unknown, path: string, seen: Set<unknown>): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
@@ -30,22 +25,18 @@ function normalize(value: unknown, path: string, seen: Set<unknown>): unknown {
   }
 }
 
-/** Pretty (2-space) deterministic JSON document with a trailing newline. */
 export function stableStringify(value: unknown): string {
   return `${JSON.stringify(normalize(value, '$', new Set()), null, 2)}\n`;
 }
 
-/** Compact deterministic JSON on one line (no trailing newline). */
 export function stableStringifyLine(value: unknown): string {
   return JSON.stringify(normalize(value, '$', new Set()));
 }
 
-/** JSON Lines: one compact deterministic object per line, each terminated by LF. */
 export function toJsonl(values: readonly unknown[]): string {
   return values.map((v) => `${stableStringifyLine(v)}\n`).join('');
 }
 
-/** Parse JSON Lines (blank lines ignored). Throws with the line number on bad JSON. */
 export function parseJsonl(text: string): unknown[] {
   const out: unknown[] = [];
   text.split('\n').forEach((line, i) => {

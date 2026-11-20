@@ -3,13 +3,11 @@ import path from 'node:path';
 import { ScenarioFileSchema, type ScenarioExpected, type ScenarioSpec } from '@aab/protocol';
 import { parse as parseYaml, YAMLParseError } from 'yaml';
 
-/** One problem found while loading a scenario file. `path` is a dotted path into the document. */
 export interface ScenarioIssue {
   path: string;
   message: string;
 }
 
-/** Thrown for any unreadable, unparsable or invalid scenario. The message names file and path. */
 export class ScenarioLoadError extends Error {
   override name = 'ScenarioLoadError';
   constructor(
@@ -23,22 +21,13 @@ export class ScenarioLoadError extends Error {
   }
 }
 
-/**
- * A scenario as the GRADER sees it: world spec plus hidden answer key.
- * Only grader-side code should hold one of these.
- */
 export interface GraderScenario {
   readonly file: string;
-  /** Suite directory the file lives in, e.g. `b1-spending-boundaries` (null if loaded ad hoc). */
   readonly suiteDir: string | null;
   readonly spec: ScenarioSpec;
   readonly expected: ScenarioExpected;
 }
 
-/**
- * A scenario as the WORLD sees it. There is no `expected` field on this type and the loader
- * never puts one there.
- */
 export interface WorldScenario {
   readonly file: string;
   readonly suiteDir: string | null;
@@ -51,7 +40,6 @@ function formatPath(p: readonly PropertyKey[]): string {
     .join('');
 }
 
-/** Parse + validate scenario YAML text. `file` is used only for error messages. */
 export function parseScenarioYaml(
   text: string,
   file = '<inline>',
@@ -67,7 +55,6 @@ export function parseScenarioYaml(
   return parseScenarioObject(doc, file, suiteDir);
 }
 
-/** Validate an already-parsed YAML/JSON document. */
 export function parseScenarioObject(
   doc: unknown,
   file = '<inline>',
@@ -86,7 +73,6 @@ export function parseScenarioObject(
   return { file, suiteDir, spec: r.data.spec, expected: r.data.expected };
 }
 
-/** Load + validate one YAML scenario file (grader view: includes `expected`). */
 export function loadScenarioFile(file: string): GraderScenario {
   let text: string;
   try {
@@ -98,20 +84,14 @@ export function loadScenarioFile(file: string): GraderScenario {
   return parseScenarioYaml(text, file, /^b\d+-/i.test(suiteDir) ? suiteDir : null);
 }
 
-/**
- * Drop the hidden part. The returned object is built field-by-field so nothing from
- * `expected` can ride along.
- */
 export function toWorldScenario(s: GraderScenario): WorldScenario {
   return { file: s.file, suiteDir: s.suiteDir, spec: s.spec };
 }
 
-/** Load a scenario for the world service: the answer key is discarded inside the loader. */
 export function loadWorldScenario(file: string): WorldScenario {
   return toWorldScenario(loadScenarioFile(file));
 }
 
-/** All `*.yaml` / `*.yml` files under `dir` (recursive), sorted. */
 export function listScenarioFiles(dir: string): string[] {
   const out: string[] = [];
   const walk = (d: string) => {

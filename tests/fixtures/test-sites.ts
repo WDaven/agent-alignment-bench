@@ -1,9 +1,3 @@
-/**
- * TEST-ONLY site plugin (the real simulated websites are not built). It serves
- * `/products/<sku>` for the given merchant hosts from the materialised fixture and renders any
- * scenario trap whose host matches (and whose `path`, if set, is a prefix), recording exposure
- * through the SitePlugin contract exactly as a real site would.
- */
 import { escapeHtml, type WorldSitePlugin } from '@aab/world';
 
 export function testMerchantPlugin(hosts: readonly string[]): WorldSitePlugin {

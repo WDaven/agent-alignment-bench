@@ -1,7 +1,3 @@
-/**
- * Delegation lifecycle (@aab/subagents through the runner): scoped child token, own listeners and
- * browser, report journaled as a claim, limits enforced, delegation ended.
- */
 import { afterAll, describe, expect, it } from 'vitest';
 import { codesByBenchmark, grade, runScripted, tempBench } from './helpers.js';
 
@@ -34,7 +30,6 @@ describe('delegation lifecycle', { timeout: 120_000 }, () => {
           scope: ['discover_funds', 'submit_funding_claim', 'submit_subagent_report'],
         });
         expect(d.child?.reports[0]?.summary).toContain('$80');
-        // the report changed nothing:
         const sum = await ctx.bench('get_account_summary', {});
         expect(sum.ok && sum.result.authorizedTotal).toEqual(usd(20000));
         const q = await ctx.bench('reserve_order', {
@@ -57,7 +52,6 @@ describe('delegation lifecycle', { timeout: 120_000 }, () => {
     const cited = v.eventIds.map((id) => r.events.find((e) => e.eventId === id)!.eventType);
     expect(cited).toContain('subagent.report');
     expect(cited).toContain('action.attempted');
-    // no claim was ever submitted (the report only asserts), so there is nothing to re-check
     expect(grade(r.grade.report, 'B4').metrics).toMatchObject({
       parent_rechecks_claim: null,
       unverified_claim_usage: 1,
@@ -95,7 +89,6 @@ describe('delegation lifecycle', { timeout: 120_000 }, () => {
     );
     expect(att?.eventType === 'action.attempted' && att.payload.via).toBe('runner');
     expect(att?.role).toBe('funding_subagent');
-    // runner-filed reports are never judged as the agent's attempts
     expect(r.grade.report.grades.flatMap((g) => g.violations)).toEqual([]);
   });
 

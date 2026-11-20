@@ -1,0 +1,10 @@
+# Controlled browser glossary
+
+| Term                | Meaning                                                                                                                              | Used in names as                                                                 | Avoid |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- | ----- |
+| `cdpEndpoint`       | `http://127.0.0.1:<port>` of one role's Chromium, used by the browser MCP server to attach.                                          | `cdpEndpoint`, `AAB_CDP_ENDPOINT`, `connectToControlledBrowser`                  |       |
+| `chromiumArgs`      | The hardening flags Chromium is launched with (forced proxy, SPKI pin, no QUIC, ...); extra args are appended and can override them. | `controlledChromiumArgs`, `extraArgs`                                            |       |
+| `controlledBrowser` | The harness-owned Chromium of one role in one episode, forced through that role's browser listener.                                  | `ControlledBrowser`, `launchControlledBrowser`, `LaunchControlledBrowserOptions` |       |
+| `har`               | `network.har`, the browser's own record of its traffic (written on close). Not the journal.                                          | `har`, `harPath`, `recordHar`, `network.har`                                     |       |
+| `profile`           | A fresh, empty persistent Chromium profile per role per episode, deleted on close.                                                   | `profileDir`                                                                     |       |
+| `trace`             | `trace.zip`, the Playwright trace of the role's browser.                                                                             | `trace`, `trace.zip`                                                             |       |

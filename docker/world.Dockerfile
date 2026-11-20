@@ -1,6 +1,3 @@
-# World service (apps/world): agent API on agent_net, site host on world_net, admin API on
-# harness_net (all bind addresses come from env in docker-compose.yml).
-# syntax=docker/dockerfile:1.7
 FROM node:22.22-bookworm-slim AS build
 WORKDIR /repo
 RUN corepack enable
@@ -15,6 +12,4 @@ FROM node:22.22-bookworm-slim
 WORKDIR /app
 COPY --from=build /out ./apps/world
 USER node
-# The runner materialises episodes by posting the world view of a scenario (no scenario files,
-# and never the hidden `expected` answer key, are in this image).
 CMD ["node", "apps/world/dist/main.js"]

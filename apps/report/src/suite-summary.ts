@@ -1,10 +1,5 @@
-/**
- * Small suite summary over `aggregate(runs)` from @aab/graders. The aggregate is passed in as
- * data (this app depends only on @aab/protocol); the types below are a structural subset of
- * graders' SuiteAggregate, so its value is accepted directly.
- */
 import { BENCHMARK_TITLES, type BenchmarkId } from '@aab/protocol';
-import { esc, fmtMetric, page, table } from './html.js';
+import { escapeHtml, fmtMetric, page, table } from './html.js';
 
 export interface IntervalLike {
   readonly lower: number;
@@ -59,7 +54,6 @@ export interface SuiteRunRow {
   readonly variant: string;
   readonly taskSuccess: boolean;
   readonly policyCompliance: boolean;
-  /** Relative link to the run's report.html, if any. */
   readonly reportHref?: string;
 }
 
@@ -86,9 +80,9 @@ function summaryCell(s: RateLike | MeanLike, minN: number): string[] {
 
 function deltaBlock(name: string, d: DeltaLike | null, minN: number): string {
   if (!d)
-    return `<p><b>${esc(name)}</b>: <span class="muted">null (no pair with both a clean and an exposed adversarial run)</span></p>`;
-  return `<p><b>${esc(name)}</b> = ${fmtMetric(d.delta)} ${d.ci ? `95% CI [${d.ci.lower.toFixed(3)}, ${d.ci.upper.toFixed(3)}]` : `<span class="muted">(no CI: n=${d.treatment.n}/${d.control.n}, need ${minN} per arm)</span>`}<br>
-<span class="muted">${esc(d.definition)}; treatment ${d.treatment.successes}/${d.treatment.n}, control ${d.control.successes}/${d.control.n}; pairs ${esc(d.pairIds.join(', '))}; not_exposed excluded: ${d.excludedNotExposed}</span></p>`;
+    return `<p><b>${escapeHtml(name)}</b>: <span class="muted">null (no pair with both a clean and an exposed adversarial run)</span></p>`;
+  return `<p><b>${escapeHtml(name)}</b> = ${fmtMetric(d.delta)} ${d.ci ? `95% CI [${d.ci.lower.toFixed(3)}, ${d.ci.upper.toFixed(3)}]` : `<span class="muted">(no CI: n=${d.treatment.n}/${d.control.n}, need ${minN} per arm)</span>`}<br>
+<span class="muted">${escapeHtml(d.definition)}; treatment ${d.treatment.successes}/${d.treatment.n}, control ${d.control.successes}/${d.control.n}; pairs ${escapeHtml(d.pairIds.join(', '))}; not_exposed excluded: ${d.excludedNotExposed}</span></p>`;
 }
 
 export function renderSuiteSummary(input: SuiteSummaryInput): string {
@@ -96,17 +90,19 @@ export function renderSuiteSummary(input: SuiteSummaryInput): string {
   const minN = a.minNForCi;
   const title = input.title ?? 'Suite summary';
   const parts: string[] = [
-    `<h1>${esc(title)}</h1>`,
-    `<p>${a.totalRuns} runs, grader ${esc(a.graderVersion)}. Rates are reported with their denominators; confidence intervals only when n ≥ ${minN}.</p>`,
+    `<h1>${escapeHtml(title)}</h1>`,
+    `<p>${a.totalRuns} runs, grader ${escapeHtml(a.graderVersion)}. Rates are reported with their denominators; confidence intervals only when n ≥ ${minN}.</p>`,
   ];
   if (a.warnings.length > 0)
-    parts.push(`<ul class="warn">${a.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`);
+    parts.push(
+      `<ul class="warn">${a.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`,
+    );
 
   parts.push('<h2>Global</h2>');
   parts.push(
     table(
       ['output', 'rate', 'k/n', '95% CI'],
-      Object.entries(a.global).map(([k, s]) => [esc(k), ...summaryCell(s, minN)]),
+      Object.entries(a.global).map(([k, s]) => [escapeHtml(k), ...summaryCell(s, minN)]),
     ),
   );
 
@@ -120,18 +116,21 @@ export function renderSuiteSummary(input: SuiteSummaryInput): string {
   parts.push(
     table(
       ['difficulty', 'rate', 'k/n', '95% CI'],
-      a.violationRateByDifficulty.map((d) => [esc(d.difficulty), ...summaryCell(d.summary, minN)]),
+      a.violationRateByDifficulty.map((d) => [
+        escapeHtml(d.difficulty),
+        ...summaryCell(d.summary, minN),
+      ]),
     ),
   );
 
   for (const b of a.benchmarks) {
     parts.push(
-      `<h2>${esc(b.benchmark)} — ${esc(BENCHMARK_TITLES[b.benchmark])} <span class="muted">(${b.graded}/${b.runs} graded)</span></h2>`,
+      `<h2>${escapeHtml(b.benchmark)} — ${escapeHtml(BENCHMARK_TITLES[b.benchmark])} <span class="muted">(${b.graded}/${b.runs} graded)</span></h2>`,
     );
     parts.push(
       table(
         ['metric', 'value', 'n', 'note'],
-        Object.entries(b.metrics).map(([k, s]) => [esc(k), ...summaryCell(s, minN)]),
+        Object.entries(b.metrics).map(([k, s]) => [escapeHtml(k), ...summaryCell(s, minN)]),
       ),
     );
     const vr = Object.entries(b.violationRuns);
@@ -139,7 +138,7 @@ export function renderSuiteSummary(input: SuiteSummaryInput): string {
       parts.push(
         table(
           ['violation', 'runs with it'],
-          vr.map(([k, n]) => [esc(k), esc(n)]),
+          vr.map(([k, n]) => [escapeHtml(k), escapeHtml(n)]),
         ),
       );
   }
@@ -149,9 +148,11 @@ export function renderSuiteSummary(input: SuiteSummaryInput): string {
     table(
       ['run', 'scenario', 'variant', 'task_success', 'policy_compliance'],
       input.runs.map((r) => [
-        r.reportHref ? `<a href="${esc(r.reportHref)}">${esc(r.runId)}</a>` : esc(r.runId),
-        esc(r.scenarioId),
-        esc(r.variant),
+        r.reportHref
+          ? `<a href="${escapeHtml(r.reportHref)}">${escapeHtml(r.runId)}</a>`
+          : escapeHtml(r.runId),
+        escapeHtml(r.scenarioId),
+        escapeHtml(r.variant),
         fmtMetric(r.taskSuccess),
         r.policyCompliance ? '<span class="ok">true</span>' : '<span class="bad">false</span>',
       ]),

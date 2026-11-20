@@ -4,7 +4,6 @@ import type { Isolation, ScenarioSpec } from '@aab/protocol';
 import { IngestError, type IngestDraft } from '@aab/world-state';
 import { NotFoundError, type EpisodeHandle, type EpisodeRegistry } from './registry.js';
 
-/** Resolves a scenario id to its WORLD view (no `expected`). */
 export type ScenarioResolver = (scenarioId: string) => ScenarioSpec | null;
 
 function sameSecret(a: string, b: string): boolean {
@@ -21,26 +20,6 @@ function describeHandle(h: EpisodeHandle) {
   };
 }
 
-/**
- * Admin API (runner/harness only). Bound to 127.0.0.1 on its own port with its own secret;
- * it is a separate Fastify instance, so none of these routes exist on the agent or site
- * listeners. Routes (all `Authorization: Bearer <adminSecret>`):
- *
- *   POST   /admin/episodes                       {scenarioId | spec, seed?, runId?, episodeId?, isolation?}
- *   GET    /admin/episodes
- *   GET    /admin/episodes/:id
- *   POST   /admin/episodes/:id/reset
- *   DELETE /admin/episodes/:id
- *   GET    /admin/episodes/:id/state             WorldState (live projection)
- *   GET    /admin/episodes/:id/initial-state     WorldState before any event
- *   GET    /admin/episodes/:id/events            events.jsonl
- *   POST   /admin/episodes/:id/events            ingest one draft or an array of drafts
- *   POST   /admin/episodes/:id/export            {dir} → events.jsonl, world-final.json, world-initial.json
- *   POST   /admin/episodes/:id/delegations/:dlg/token
- *   POST   /admin/episodes/:id/delegations/:dlg/end   {status, finalResponse?}
- *   POST   /admin/episodes/:id/actions/:action   {role, delegationId?, request} (via runner)
- *   POST   /admin/episodes/:id/end               {reason, agentStatus?, error?}
- */
 export function buildAdminApi(
   registry: EpisodeRegistry,
   opts: { adminSecret: string; resolveScenario: ScenarioResolver | null },
@@ -52,7 +31,8 @@ export function buildAdminApi(
   app.addHook('onRequest', async (req, reply) => {
     const h = req.headers.authorization;
     const m = typeof h === 'string' ? /^Bearer\s+(\S+)$/i.exec(h.trim()) : null;
-    if (!m || !sameSecret(m[1]!, opts.adminSecret))
+    const presented = m?.[1];
+    if (presented === undefined || !sameSecret(presented, opts.adminSecret))
       return reply.code(401).send({ error: 'unauthorized' });
   });
 
@@ -69,7 +49,7 @@ export function buildAdminApi(
       spec = opts.resolveScenario(b.scenarioId);
       if (!spec) return reply.code(404).send({ error: `unknown scenario ${b.scenarioId}` });
     } else if (b.spec && typeof b.spec === 'object') {
-      spec = b.spec as ScenarioSpec; // validated strictly (unknown keys such as `expected` rejected)
+      spec = b.spec as ScenarioSpec;
     } else return reply.code(400).send({ error: 'give scenarioId or spec' });
     const h = registry.materialize({
       spec,
@@ -126,8 +106,6 @@ export function buildAdminApi(
     );
     return { seq: e.seq, eventId: e.eventId };
   });
-  // Runner-originated world operation (journaled with via `runner`, never judged as the agent's),
-  // e.g. filing a child's final response as its subagent report.
   app.post('/admin/episodes/:id/actions/:action', async (req, reply) => {
     const b = body(req);
     const role = b.role === 'parent' || b.role === 'funding_subagent' ? b.role : null;

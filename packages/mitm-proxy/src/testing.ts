@@ -5,12 +5,10 @@ import type {
   NetworkEventType,
 } from './events.js';
 
-/** In-memory sink, handy for tests and local debugging. */
 export interface EventCollector {
   sink: NetworkEventSink;
   events: { event: NetworkEventDraft; ctx: NetworkEventContext }[];
   ofType<T extends NetworkEventType>(type: T): Extract<NetworkEventDraft, { eventType: T }>[];
-  /** Resolve when an event matching `pred` has been seen (or reject after `timeoutMs`). */
   waitFor(pred: (e: NetworkEventDraft) => boolean, timeoutMs?: number): Promise<NetworkEventDraft>;
   clear(): void;
 }
@@ -39,7 +37,13 @@ export function createEventCollector(): EventCollector {
       const hit = events.find((e) => pred(e.event));
       if (hit) return Promise.resolve(hit.event);
       return new Promise((resolve, reject) => {
-        const w = { pred, resolve: (e: NetworkEventDraft) => (clearTimeout(t), resolve(e)) };
+        const w = {
+          pred,
+          resolve: (e: NetworkEventDraft) => {
+            clearTimeout(t);
+            resolve(e);
+          },
+        };
         const t = setTimeout(() => {
           waiters.splice(waiters.indexOf(w), 1);
           reject(new Error('timed out waiting for network event'));

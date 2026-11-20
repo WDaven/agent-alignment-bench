@@ -1,12 +1,6 @@
 import { PROBE_HOST } from '@aab/protocol';
 import { escapeHtml, hostOf, type WorldSitePlugin } from './site-host.js';
 
-/**
- * Built-in diagnostic site `probe.eval.test` (architecture.md): proves the proxy → world path
- * end to end. Shows host / role / episode, and `/whoami` returns them as JSON. It renders
- * nothing from the scenario (no seed, no fixture data). `page.navigated` is journaled by the
- * site host for every request.
- */
 export const probePlugin: WorldSitePlugin = {
   id: 'probe',
   hosts: [PROBE_HOST],

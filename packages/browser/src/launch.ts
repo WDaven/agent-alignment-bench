@@ -5,53 +5,35 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { readLeafSpkiFingerprint } from '@aab/pki';
 
 export interface LaunchControlledBrowserOptions {
-  /** Port of this role's MITM proxy listener. */
   proxyPort: number;
-  /** Proxy host (default 127.0.0.1; inside docker the proxy service name). */
   proxyHost?: string;
-  /** PKI dir created by `@aab/pki` `ensureCa` (only its public `leaf-pub.pem` is read). */
   caDir: string;
-  /**
-   * Fresh profile directory. Must not exist or be empty; deleted on close. Default: a new temp dir.
-   */
   profileDir?: string;
-  /** Where trace.zip, network.har and screenshots/ go. */
   artifactsDir: string;
   headless?: boolean;
-  /** Playwright channel; default: bundled Chromium (`chromium-headless-shell` when headless). */
+  chromiumSandbox?: boolean;
+  devToolsTimeoutMs?: number;
   channel?: string;
-  /** Remote debugging port on 127.0.0.1 (0 = pick a free one). */
   cdpPort?: number;
-  /** Record Playwright trace (default true). */
   trace?: boolean;
-  /** Record a HAR (default true). */
   har?: boolean;
   viewport?: { width: number; height: number };
-  /** Extra Chromium args (appended; cannot re-enable what we disable — later flags may override!). */
   extraArgs?: string[];
 }
 
 export interface ControlledBrowser {
   context: BrowserContext;
-  /** `http://127.0.0.1:<port>` — for `chromium.connectOverCDP()` / Playwright MCP `--cdp-endpoint`. */
   cdpEndpoint: string;
-  /** Browser-level DevTools websocket URL. */
   wsEndpoint: string;
   profileDir: string;
   artifactsDir: string;
-  /** SPKI pin passed to `--ignore-certificate-errors-spki-list`. */
   trustedSpki: string;
-  /** Chromium args we launched with (for run metadata). */
   args: readonly string[];
-  /** The first page (persistent contexts open one). */
   page(): Promise<Page>;
-  /** Save a PNG to `<artifactsDir>/screenshots/<name>.png` and return its path. */
   screenshot(name: string, page?: Page): Promise<string>;
-  /** Stop tracing (trace.zip), close (flushes network.har), delete the profile. Idempotent. */
   close(): Promise<void>;
 }
 
-/** Features turned off: background/phone-home traffic and anything that could bypass the proxy. */
 const DISABLED_FEATURES = [
   'AutofillServerCommunication',
   'CertificateTransparencyComponentUpdater',
@@ -73,13 +55,9 @@ export function controlledChromiumArgs(opts: {
   cdpPort: number;
 }): string[] {
   return [
-    // All traffic, including loopback, through this role's proxy listener.
     `--proxy-server=http://${opts.proxyHost}:${opts.proxyPort}`,
     '--proxy-bypass-list=<-loopback>',
-    // Defence in depth: anything that tried to resolve a name *without* the proxy gets NXDOMAIN.
-    // (With an HTTP proxy Chromium never resolves destination names itself.)
     `--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE ${opts.proxyHost}`,
-    // Trust exactly the eval CA's shared leaf key (see packages/browser/README.md).
     `--ignore-certificate-errors-spki-list=${opts.spki}`,
     '--disable-quic',
     '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
@@ -99,6 +77,7 @@ export function controlledChromiumArgs(opts: {
     '--dns-prefetch-disable',
     '--password-store=basic',
     '--use-mock-keychain',
+    ...(process.platform === 'linux' ? ['--disable-dev-shm-usage'] : []),
     `--disable-features=${DISABLED_FEATURES.join(',')}`,
     `--remote-debugging-address=127.0.0.1`,
     `--remote-debugging-port=${opts.cdpPort}`,
@@ -119,10 +98,9 @@ async function freshProfileDir(dir: string | undefined): Promise<string> {
   return d;
 }
 
-/** Wait for Chromium to write DevToolsActivePort (port + browser ws path) into the profile. */
 async function readDevToolsActivePort(
   profileDir: string,
-  timeoutMs = 10_000,
+  timeoutMs: number,
 ): Promise<{ port: number; wsPath: string }> {
   const file = path.join(profileDir, 'DevToolsActivePort');
   const deadline = Date.now() + timeoutMs;
@@ -130,23 +108,15 @@ async function readDevToolsActivePort(
     try {
       const [port, wsPath] = (await readFile(file, 'utf8')).split('\n');
       if (port && wsPath) return { port: Number(port), wsPath };
-    } catch {
-      /* not yet */
-    }
+    } catch {}
     if (Date.now() > deadline) throw new Error('Chromium did not report a DevTools port');
     await new Promise((r) => setTimeout(r, 50));
   }
 }
 
-/**
- * Launch Playwright's Chromium with a fresh persistent profile whose every request goes through
- * the given proxy listener, trusting only leaves minted by the eval CA. No OS/user trust store is
- * touched.
- */
 export async function launchControlledBrowser(
   opts: LaunchControlledBrowserOptions,
 ): Promise<ControlledBrowser> {
-  // Public material only (leaf-pub.pem): the browser host never needs a private key.
   const spki = await readLeafSpkiFingerprint(opts.caDir);
   const profileDir = await freshProfileDir(opts.profileDir);
   const artifactsDir = path.resolve(opts.artifactsDir);
@@ -165,9 +135,9 @@ export async function launchControlledBrowser(
   try {
     context = await chromium.launchPersistentContext(profileDir, {
       headless: opts.headless ?? true,
+      chromiumSandbox: opts.chromiumSandbox ?? false,
       ...(opts.channel ? { channel: opts.channel } : {}),
       args,
-      // Never: ignoreHTTPSErrors. A certificate not from our CA must still fail.
       ignoreHTTPSErrors: false,
       serviceWorkers: 'block',
       acceptDownloads: false,
@@ -183,7 +153,7 @@ export async function launchControlledBrowser(
 
   let devtools: { port: number; wsPath: string };
   try {
-    devtools = await readDevToolsActivePort(profileDir);
+    devtools = await readDevToolsActivePort(profileDir, opts.devToolsTimeoutMs ?? 30_000);
   } catch (e) {
     await context.close().catch(() => {});
     await rm(profileDir, { recursive: true, force: true });
@@ -228,10 +198,6 @@ export async function launchControlledBrowser(
   return browser;
 }
 
-/**
- * Attach to a controlled browser over CDP (what the `browser` MCP server does). Closing the
- * returned Browser only disconnects; the owner still has to call `ControlledBrowser.close()`.
- */
 export function connectToControlledBrowser(cdpEndpoint: string): Promise<Browser> {
   if (!/^(http|ws):\/\/127\.0\.0\.1:\d+/.test(cdpEndpoint)) {
     throw new Error('controlled browsers only expose CDP on 127.0.0.1');

@@ -1,6 +1,5 @@
 import type { AgentEpisodeView, JsonValue } from '@aab/protocol';
 
-/** Paths of the world Agent API (apps/world agent-api.ts). Duplicated to avoid a dependency on the world app. */
 export const AGENT_API = {
   episode: '/v1/episode',
   action: (name: string) => `/v1/actions/${encodeURIComponent(name)}`,
@@ -31,10 +30,6 @@ export interface DelegationStatus {
   }[];
 }
 
-/**
- * Minimal client for the world Agent API, bound to one bearer token. Used by both MCP servers
- * and by the scripted reference agent's direct mode. The token never leaves this object.
- */
 export class AgentApiClient {
   readonly #token: string;
   constructor(
@@ -78,7 +73,6 @@ export class AgentApiClient {
     return r.json as AgentEpisodeView;
   }
 
-  /** Call a world operation. Denials are normal results (`ok: false`). */
   async call(
     action: string,
     request: unknown,
@@ -92,13 +86,10 @@ export class AgentApiClient {
     return r.json;
   }
 
-  /** Journal a tool call (best effort: a failure here never fails the tool). */
   async reportToolCall(rec: ToolCallRecord): Promise<void> {
     try {
       await this.request('POST', AGENT_API.toolCalls, { pageUrl: null, ...rec });
-    } catch {
-      /* journaling is best effort; the world journals the action itself regardless */
-    }
+    } catch {}
   }
 
   async delegation(id: string): Promise<DelegationStatus | null> {
@@ -109,10 +100,6 @@ export class AgentApiClient {
   }
 }
 
-/**
- * Deterministic, IdSchema-compatible tool call ids: `tc-<server>-<role>[-<delegation>]-<n>`, so
- * identical runs produce identical journals (spec §12.10).
- */
 export function toolCallIdFactory(
   server: 'browser' | 'bench',
   view: Pick<AgentEpisodeView, 'role' | 'delegationId'>,
@@ -123,7 +110,6 @@ export function toolCallIdFactory(
   return () => `${prefix}-${(++n).toString().padStart(5, '0')}`;
 }
 
-/** Make an arbitrary value JSON-safe (journal payloads must be JsonValue). */
 export function toJsonValue(v: unknown): JsonValue {
   try {
     return JSON.parse(JSON.stringify(v ?? null)) as JsonValue;

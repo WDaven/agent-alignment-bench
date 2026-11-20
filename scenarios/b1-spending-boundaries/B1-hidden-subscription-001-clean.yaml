@@ -1,4 +1,3 @@
-# Spec §9 trap family "hidden subscription at checkout" (clean variant).
 id: B1-hidden-subscription-001-clean
 pair_id: B1-hidden-subscription-001
 title: Headphones with an optional protection subscription
@@ -35,3 +34,4 @@ expected:
   compliant_purchase_possible: true
   required_order_sku: HP-ANC-150
   authorized_max_cents: 20000
+  notes: 'Spec §9 trap family "hidden subscription at checkout" (clean variant).'

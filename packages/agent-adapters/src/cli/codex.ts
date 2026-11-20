@@ -1,30 +1,7 @@
-/**
- * Codex adapter (`codex exec`). Flags verified against the installed `codex exec --help`
- * (codex-cli 0.169.0) and its `features list`:
- *
- *   codex exec --json --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules
- *              --sandbox read-only -C <workDir>
- *              -c approval_policy="never" -c web_search="disabled"
- *              --disable <shell_tool, unified_exec, apps, plugins, browser_use, computer_use, ...>
- *              -c mcp_servers.<name>.command=... .args=[...] .env={...}
- *                 .default_tools_approval_mode="approve" .startup_timeout_sec .tool_timeout_sec
- *              [-m <model>] <prompt>
- *
- * Everything is passed with `-c` (and `--ignore-user-config`), so the same argv works with an
- * isolated CODEX_HOME (api_key mode) and with the user's own ~/.codex login (`auth: inherit`,
- * whose config.toml is then NOT loaded). The bench token is never on argv: the MCP env holds only
- * the agent API URL and the path of a 0600 token file.
- *
- * Verified with a fake key (no model call): `codex exec` reads CODEX_API_KEY (not
- * OPENAI_API_KEY); its model traffic (wss + https to api.openai.com) goes through HTTPS_PROXY as
- * `network.tunnel`, and TLS verifies with SSL_CERT_FILE / CODEX_CA_CERTIFICATE = ca-bundle.pem;
- * MCP children get a sanitised env (PATH, HOME, the CA vars, plus the configured `env`).
- */
 import type { AgentEpisodeView, AgentInfo, AgentTools } from '@aab/protocol';
 import { CliAgentAdapter, composePrompt, type CliInvocation } from './base.js';
 import { CLI_PROMPT_VERSION, buildChildEnv, safeId, type CliAdapterOptions } from './common.js';
 
-/** Features (from `codex features list`, 0.169.0) that give the model tools we do not control. */
 export const CODEX_DISABLED_FEATURES = [
   'shell_tool',
   'unified_exec',
@@ -43,11 +20,8 @@ export const CODEX_DISABLED_FEATURES = [
   'tool_suggest',
   'skill_search',
   'skill_mcp_dependency_install',
-  // NOT disabled: `code_mode_host`. In 0.169.0 Codex routes model tool calls (including MCP tools)
-  // through its code-mode host and "fails closed" without it (verified in the live smoke run).
 ];
 
-/** TOML value for `-c key=value` (JSON strings/arrays are valid TOML basic strings/arrays). */
 function toml(v: unknown): string {
   if (typeof v === 'string') return JSON.stringify(v);
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
@@ -102,7 +76,6 @@ export class CodexAdapter extends CliAgentAdapter {
     const harnessEnv = this.opts.harnessEnv ?? process.env;
     const configEnv: Record<string, string> = {};
     if (this.auth === 'api_key') configEnv.CODEX_HOME = tools.configHome;
-    // codex exec authenticates from CODEX_API_KEY; accept OPENAI_API_KEY from the harness env.
     const keyVar = harnessEnv.CODEX_API_KEY ? 'CODEX_API_KEY' : 'OPENAI_API_KEY';
     const { env, secrets } = buildChildEnv({
       tools,
@@ -113,8 +86,9 @@ export class CodexAdapter extends CliAgentAdapter {
       configEnv,
       ...(this.opts.extraEnv ? { extra: this.opts.extraEnv } : {}),
     });
-    if (this.auth === 'api_key' && keyVar === 'OPENAI_API_KEY') {
-      env.CODEX_API_KEY = env.OPENAI_API_KEY!;
+    const openAiKey = env.OPENAI_API_KEY;
+    if (this.auth === 'api_key' && keyVar === 'OPENAI_API_KEY' && openAiKey !== undefined) {
+      env.CODEX_API_KEY = openAiKey;
       delete env.OPENAI_API_KEY;
     }
     const argv = [
@@ -156,7 +130,6 @@ export class CodexAdapter extends CliAgentAdapter {
       if (it === 'agent_message' && typeof item.text === 'string')
         this.state.finalResponse = item.text;
       else if (!NON_TOOL_ITEMS.has(it)) {
-        // A built-in tool (command_execution, file_change, web_search, ...): not harness-controlled.
         const { id, type: _t, status, ...rest } = item;
         this.observe({
           toolCallId: safeId('cli-codex', id, ++this.n),

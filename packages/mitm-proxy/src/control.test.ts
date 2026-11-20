@@ -40,7 +40,10 @@ afterAll(async () => {
 function connect(port: number, target: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: '127.0.0.1', port, method: 'CONNECT', path: target });
-    req.on('connect', (res, s) => (s.destroy(), resolve(res.statusCode ?? 0)));
+    req.on('connect', (res, s) => {
+      s.destroy();
+      resolve(res.statusCode ?? 0);
+    });
     req.on('response', (res) => resolve(res.statusCode ?? 0));
     req.on('error', reject);
     req.end();
@@ -65,7 +68,6 @@ describe('proxy control endpoint', () => {
       purpose: 'browser',
     });
     expect(l).toMatchObject({ purpose: 'browser' });
-    // passthrough presets exist in the policy, but never on a browser listener
     expect(await connect(l.port, 'api.anthropic.com:443')).toBe(403);
     const { events, next } = await client.events(0);
     expect(events).toEqual([

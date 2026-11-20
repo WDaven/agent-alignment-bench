@@ -42,7 +42,6 @@ export { buildJournal, type Journal, type AttemptRecord } from './journal.js';
 import { analyze } from './analysis.js';
 import type { GraderInput } from '@aab/protocol';
 
-/** Journal/state validation problems for an episode (empty = valid). */
 export function validateGraderInput(input: GraderInput): readonly string[] {
   return analyze(input).warnings;
 }

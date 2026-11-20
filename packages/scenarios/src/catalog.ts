@@ -9,7 +9,6 @@ import {
   type WorldScenario,
 } from './load.js';
 
-/** All scenarios under a directory, indexed by id. Holds grader views; hand out world views. */
 export class ScenarioCatalog {
   private readonly byId = new Map<string, GraderScenario>();
 
@@ -25,7 +24,6 @@ export class ScenarioCatalog {
     }
   }
 
-  /** Load every YAML file under `dir`. Aggregates all errors into one ScenarioLoadError list. */
   static loadDir(dir: string): ScenarioCatalog {
     const loaded: GraderScenario[] = [];
     const errors: ScenarioLoadError[] = [];
@@ -50,33 +48,23 @@ export class ScenarioCatalog {
   }
 
   all(): GraderScenario[] {
-    return this.ids().map((id) => this.byId.get(id)!);
+    return this.ids().flatMap((id) => this.byId.get(id) ?? []);
   }
 
   has(id: string): boolean {
     return this.byId.has(id);
   }
 
-  /** Grader view (with `expected`). */
   getForGrader(id: string): GraderScenario {
     const s = this.byId.get(id);
     if (!s) throw new Error(`unknown scenario ${id}`);
     return s;
   }
 
-  /** World view (no `expected`). */
   getForWorld(id: string): WorldScenario {
     return toWorldScenario(this.getForGrader(id));
   }
 
-  /**
-   * Resolve a suite name to scenario ids (sorted):
-   * - `all` → every scenario;
-   * - `b1` / `B1` → scenarios in a `b1-*` directory;
-   * - `b1-spending-boundaries` → that directory;
-   * - `tag:B3` → every scenario whose benchmark_ids include B3;
-   * - comma-separated combinations (`b1,b2`).
-   */
   resolveSuite(suite: string): string[] {
     const out = new Set<string>();
     for (const raw of suite
@@ -100,7 +88,6 @@ export class ScenarioCatalog {
     return [...out].sort();
   }
 
-  /** All scenarios sharing `pairId` with `id`, split by variant. */
   pairOf(id: string): {
     pairId: string;
     clean: GraderScenario | null;
@@ -119,12 +106,12 @@ export class ScenarioCatalog {
     };
   }
 
-  /** Every pair id with both a clean and at least one adversarial member. */
   pairs(): { pairId: string; clean: GraderScenario; adversarial: GraderScenario[] }[] {
     const ids = [...new Set(this.all().map((s) => s.spec.pairId))].sort();
     const out: { pairId: string; clean: GraderScenario; adversarial: GraderScenario[] }[] = [];
     for (const pid of ids) {
-      const first = this.all().find((s) => s.spec.pairId === pid)!;
+      const first = this.all().find((s) => s.spec.pairId === pid);
+      if (!first) continue;
       const p = this.pairOf(first.spec.id);
       if (p.clean && p.adversarial.length)
         out.push({ pairId: pid, clean: p.clean, adversarial: p.adversarial });
@@ -133,7 +120,6 @@ export class ScenarioCatalog {
   }
 }
 
-/** Paths that may legitimately differ between the members of a clean/adversarial pair. */
 function stripTrapParts(spec: ScenarioSpec, expected: ScenarioExpected | null) {
   const { id: _id, title: _title, variant: _variant, world, ...rest } = spec;
   const { traps: _traps, searchIndex, ...worldRest } = world;
@@ -174,20 +160,14 @@ function diffPaths(a: unknown, b: unknown, at: string, out: string[]): void {
     return;
   }
   if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
-    a.forEach((v, i) => diffPaths(v, b[i], `${at}[${i}]`, out));
+    a.forEach((v, i) => {
+      diffPaths(v, b[i], `${at}[${i}]`, out);
+    });
     return;
   }
   out.push(at || '<root>');
 }
 
-/**
- * Check that two scenarios differ only in traps: id/title/variant, `world.traps`, search docs
- * that belong to a trap (`trap_id` set), and the trap oracles / notes in `expected`.
- * Everything else (task text, policy, products, resources, accounts, oracle, seed) must be
- * identical. Returns the differing paths (empty = OK).
- *
- * Pass grader views to compare `expected` too; with world views only specs are compared.
- */
 export function pairDifferences(
   clean: { spec: ScenarioSpec; expected?: ScenarioExpected },
   adversarial: { spec: ScenarioSpec; expected?: ScenarioExpected },

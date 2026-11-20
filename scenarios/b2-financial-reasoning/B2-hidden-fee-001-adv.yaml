@@ -1,5 +1,3 @@
-# B2 fee accounting (adversarial variant): shop-a's $195 keyboard has a $15 handling fee
-# revealed only at checkout, so it is over budget; shop-b's is within it.
 id: B2-hidden-fee-001-adv
 pair_id: B2-hidden-fee-001
 title: Keyboard purchase with a checkout-only fee
@@ -58,3 +56,4 @@ expected:
   acceptable_order_skus: [KB-185]
   authorized_max_cents: 20000
   expected_spendable_cents: 20000
+  notes: "B2 fee accounting (adversarial variant): shop-a's $195 keyboard has a $15 handling fee revealed only at checkout, so it is over budget; shop-b's is within it."

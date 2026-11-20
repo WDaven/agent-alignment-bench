@@ -10,4 +10,4 @@
   into final response, usage and `cli` tool calls. `auth: 'api_key'` (default) or `'inherit'`.
 - `ExternalBridgeAdapter` — configuration surface only; always `unsupported`.
 
-Unit tests run both CLI adapters against a fake CLI (`src/__tests__/fixtures/fake-cli.mjs`).
+Unit tests run both CLI adapters against a fake CLI (`src/tests/fixtures/fake-cli.mjs`).

@@ -1,19 +1,3 @@
-/**
- * Delegation lifecycle (spec §6.10, §12.6). When a parent's `delegate` commits, the world
- * journals `delegation.started`; the DelegationManager then:
- *
- *  1. obtains the child's own scoped bearer token + AgentEpisodeView from the world
- *     (role funding_subagent, the delegation's granted scope, the parent's task text),
- *  2. asks the host to provision the child's own environment (own proxy listeners, own browser
- *     profile, own trace directory, own MCP servers),
- *  3. runs a child adapter of the same kind as the parent, enforcing the child's step and
- *     wall-clock limits (the child is stopped when it exceeds them → delegation `timeout`),
- *  4. journals the child's final response as a `subagent.report` (submitted with via `runner`
- *     when the child did not file one itself) — a CLAIM for the parent, never a budget change —
- *     and ends the delegation (`delegation.ended`), then releases the child's environment.
- *
- * The world enforces the child's scope on every attempt; this package only runs the lifecycle.
- */
 import type {
   AgentAdapter,
   AgentAdapterFactory,
@@ -33,24 +17,17 @@ export interface DelegationStartedInfo {
 
 export type DelegationEndStatus = 'completed' | 'timeout' | 'error' | 'cancelled';
 
-/** What the runner must provide (implemented over the in-process world or the admin API). */
 export interface DelegationHost {
-  /** Subscribe to `delegation.started`; returns unsubscribe. */
   onDelegationStarted(cb: (d: DelegationStartedInfo) => void): () => void;
-  /** Child bearer token and view (scoped to the delegation). The token goes to the child's tools only. */
   childCredentials(delegationId: string): Promise<{ token: string; view: AgentEpisodeView }>;
-  /** World attempts made by this delegation's child so far. */
   childSteps(delegationId: string): Promise<number>;
-  /** Whether the child already filed a `subagent.report`. */
   hasReport(delegationId: string): Promise<boolean>;
-  /** File the child's final response as a report on its behalf (`via: runner`). */
   submitRunnerReport(delegationId: string, summary: string): Promise<void>;
   endDelegation(
     delegationId: string,
     status: DelegationEndStatus,
     finalResponse: string | null,
   ): Promise<void>;
-  /** Own listeners + browser + tools + artifacts for the child. */
   provision(
     delegationId: string,
     token: string,
@@ -59,9 +36,7 @@ export interface DelegationHost {
 }
 
 export interface ChildLimits {
-  /** Max world attempts by the child (default: its view's maxSteps). */
   maxSteps?: number;
-  /** Max wall-clock for the child (default: its view's maxWallMs). */
   maxWallMs?: number;
   pollMs?: number;
 }
@@ -162,29 +137,23 @@ export class DelegationManager {
     try {
       if (finalResponse && !(await this.host.hasReport(d.delegationId)))
         await this.host.submitRunnerReport(d.delegationId, finalResponse);
-    } catch {
-      /* the report is best effort; delegation.ended still carries the final response */
-    }
+    } catch {}
     try {
       await this.host.endDelegation(
         d.delegationId,
         this.closed ? 'cancelled' : status,
         finalResponse,
       );
-    } catch {
-      /* already ended */
-    }
+    } catch {}
     await release?.().catch(() => undefined);
     return { delegationId: d.delegationId, status, result, error, stepsUsed: steps };
   }
 
-  /** Wait for every child started so far. */
   async drain(): Promise<readonly ChildRecord[]> {
     await Promise.all([...this.running.values()].map((r) => r.done));
     return this.finished;
   }
 
-  /** Stop all children (delegations end `cancelled`) and stop listening. */
   async stopAll(): Promise<void> {
     this.closed = true;
     this.unsubscribe?.();

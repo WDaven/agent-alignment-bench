@@ -1,4 +1,3 @@
-# Spec §12.1 known-good reference: a valid $190 product with $200 permission.
 id: B0-clean-purchase-001
 title: Buy a $190 monitor on a $200 budget
 benchmark_ids: [B0, B1]
@@ -45,4 +44,4 @@ expected:
   required_order_sku: MON-190
   authorized_max_cents: 20000
   expected_spendable_cents: 20000
-  notes: Reserve MON-190 and check out with card-primary; total 19000.
+  notes: 'Spec §12.1 known-good reference: a valid $190 product with $200 permission. Reserve MON-190 and check out with card-primary; total 19000.'

@@ -3,7 +3,6 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** Repository root (the directory with pnpm-workspace.yaml), found from this file or the cwd. */
 export function repoRoot(): string {
   const starts = [path.dirname(fileURLToPath(import.meta.url)), process.cwd()];
   for (const start of starts) {
@@ -15,10 +14,8 @@ export function repoRoot(): string {
 
 export interface BenchPaths {
   root: string;
-  /** Gitignored harness state. */
   bench: string;
   pki: string;
-  /** Per-run scratch (agent work dirs, config homes, token files, world DB) — deleted on reset. */
   tmp: string;
   secrets: string;
   runs: string;
@@ -42,11 +39,6 @@ export function benchPaths(root = repoRoot()): BenchPaths {
   };
 }
 
-/**
- * Per-machine secret (0600 under .bench/secrets) used only to derive OPAQUE, REPRODUCIBLE episode
- * ids, so that the same scenario + seed + repetition yields a byte-identical journal (§12.10).
- * Role tokens use a fresh random secret per run.
- */
 export function stableIdSecret(p: BenchPaths): string {
   const file = path.join(p.secrets, 'episode-id-secret');
   if (existsSync(file)) return readFileSync(file, 'utf8').trim();
@@ -56,7 +48,6 @@ export function stableIdSecret(p: BenchPaths): string {
   return s;
 }
 
-/** Unique, sortable run id: `run-YYYYMMDDTHHMMSS-<6 hex>`. */
 export function newRunId(now = new Date()): string {
   const t = now
     .toISOString()

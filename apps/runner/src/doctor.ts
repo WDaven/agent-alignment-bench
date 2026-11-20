@@ -12,13 +12,17 @@ import { ScenarioCatalog } from '@aab/scenarios';
 import { LocalBackend } from './backend.js';
 import type { BenchPaths } from './paths.js';
 
+function firstLine(text: string): string {
+  const end = text.indexOf('\n');
+  return end === -1 ? text : text.slice(0, end);
+}
+
 const execFileP = promisify(execFile);
 
 export interface Check {
   name: string;
   ok: boolean;
   detail: string;
-  /** Optional checks (e.g. a CLI you do not use) do not fail doctor. */
   optional?: boolean;
 }
 
@@ -100,7 +104,6 @@ export async function doctor(p: BenchPaths, opts: { selfTest?: boolean } = {}): 
   return checks;
 }
 
-/** Real Chromium → browser listener → proxy → world: probe loads, example.com is denied. */
 export async function proxySelfTest(p: BenchPaths): Promise<Check[]> {
   const out: Check[] = [];
   const ca = await ensureTrustMaterial(p.pki);
@@ -113,7 +116,9 @@ export async function proxySelfTest(p: BenchPaths): Promise<Check[]> {
   const tmp = path.join(os.tmpdir(), `aab-doctor-${randomBytes(4).toString('hex')}`);
   try {
     const catalog = ScenarioCatalog.loadDir(p.scenarios);
-    const spec = catalog.getForWorld(catalog.ids()[0]!).spec;
+    const firstId = catalog.ids()[0];
+    if (firstId === undefined) throw new Error(`no scenarios in ${p.scenarios}`);
+    const spec = catalog.getForWorld(firstId).spec;
     const m = await backend.materialize({
       spec,
       seed: spec.seed,
@@ -145,12 +150,12 @@ export async function proxySelfTest(p: BenchPaths): Promise<Check[]> {
         ok: role === 'parent',
         detail:
           res instanceof Error
-            ? res.message.split('\n')[0]!
+            ? firstLine(res.message)
             : `HTTP ${res?.status()}, role shown: ${role}`,
       });
       const ex = await page.goto('https://example.com/').then(
         () => 'loaded (BAD)',
-        (e: Error) => e.message.split('\n')[0]!,
+        (e: Error) => firstLine(e.message),
       );
       const evs = await backend.events(m.episode.id);
       const denied = evs.some(

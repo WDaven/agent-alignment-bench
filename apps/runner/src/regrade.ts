@@ -12,10 +12,6 @@ import { renderRunReport, renderSuiteSummary, type SuiteRunRow } from '@aab/repo
 import { ScenarioCatalog } from '@aab/scenarios';
 import { initialProjection } from '@aab/world-state';
 
-/**
- * Re-grade a run from its artifacts only (events.jsonl + episode.json + world-final.json +
- * world-initial.json), loading the scenario's hidden answer key from the scenarios directory.
- */
 export function regradeRun(
   runDir: string,
   scenariosDir: string,
@@ -43,7 +39,6 @@ export function regradeRun(
   return { data, result };
 }
 
-/** Rewrite grades.json + report.html of a finished run. */
 export function writeRegrade(runDir: string, scenariosDir: string): EpisodeGradeResult {
   const { data, result } = regradeRun(runDir, scenariosDir);
   const a = new RunArtifacts({
@@ -66,7 +61,6 @@ export function writeRegrade(runDir: string, scenariosDir: string): EpisodeGrade
   return result;
 }
 
-/** (Re)render report.html of a run from its artifacts (no re-grading). */
 export function renderReportFor(runDir: string): string {
   const data = readRun(runDir);
   const a = new RunArtifacts({
@@ -87,7 +81,6 @@ export function renderReportFor(runDir: string): string {
   );
 }
 
-/** Suite summary over every run directory directly under `dir` (or listed run dirs). */
 export function writeSuiteSummary(dir: string, title?: string): { file: string; runs: number } {
   const runDirs = readdirSync(dir)
     .map((n) => path.join(dir, n))
@@ -115,7 +108,6 @@ export function writeSuiteSummary(dir: string, title?: string): { file: string; 
     runs: rows,
   });
   const file = path.join(dir, 'summary.html');
-  // Derived, post-run outputs (no agent is live).
   writeFileSync(file, html);
   writeFileSync(path.join(dir, 'summary.json'), stableStringify(agg));
   return { file, runs: rows.length };

@@ -1,8 +1,3 @@
-/**
- * Single-run report (spec §11): task, model, scenario, attempted/executed timeline with
- * allowed/denied, parent vs child traces, violations with event links, validation warnings,
- * network denials. Pure: returns an HTML string; the runner writes it via @aab/artifacts.
- */
 import {
   BENCHMARK_TITLES,
   type Episode,
@@ -11,18 +6,15 @@ import {
   type RunEventOf,
   type RunMetadata,
 } from '@aab/protocol';
-import { esc, evAnchor, evLink, fmtMetric, jsonCell, page, table } from './html.js';
+import { escapeHtml, eventAnchor, eventLink, fmtMetric, jsonCell, page, table } from './html.js';
 
 export interface RunReportInput {
   readonly episode: Episode | null;
   readonly meta: RunMetadata | null;
   readonly events: readonly RunEvent[];
   readonly grades: GradeReport | null;
-  /** From gradeEpisode().validationWarnings; validation notes inside grades are merged in too. */
   readonly validationWarnings?: readonly string[];
-  /** Artifact read problems (missing/invalid files). */
   readonly problems?: readonly string[];
-  /** Screenshot file names under screenshots/. */
   readonly screenshots?: readonly string[];
 }
 
@@ -34,20 +26,20 @@ function summarize(e: RunEvent): string {
   const p = e.payload as Record<string, unknown>;
   switch (e.eventType) {
     case 'action.attempted':
-      return `${esc(e.payload.action)} via ${esc(e.payload.via)} ${jsonCell(e.payload.request, 160)}`;
+      return `${escapeHtml(e.payload.action)} via ${escapeHtml(e.payload.via)} ${jsonCell(e.payload.request, 160)}`;
     case 'action.committed':
-      return `<span class="ok">committed</span> ${esc(e.payload.action)}`;
+      return `<span class="ok">committed</span> ${escapeHtml(e.payload.action)}`;
     case 'action.denied':
-      return `<span class="bad">denied</span> ${esc(e.payload.action)}: ${esc(e.payload.reason)} (${esc(e.payload.category)})`;
+      return `<span class="bad">denied</span> ${escapeHtml(e.payload.action)}: ${escapeHtml(e.payload.reason)} (${escapeHtml(e.payload.category)})`;
     case 'page.navigated':
     case 'network.request':
-      return `${esc(p['method'])} ${esc(p['url'])} → ${esc(p['status'])}`;
+      return `${escapeHtml(p.method)} ${escapeHtml(p.url)} → ${escapeHtml(p.status)}`;
     case 'network.denied':
-      return `<span class="bad">${esc(e.payload.reason)}</span> ${esc(e.payload.host)}:${esc(e.payload.port)}`;
+      return `<span class="bad">${escapeHtml(e.payload.reason)}</span> ${escapeHtml(e.payload.host)}:${escapeHtml(e.payload.port)}`;
     case 'trap.exposed':
-      return `<span class="bad">trap ${esc(e.payload.trapId)}</span> (${esc(e.payload.trapType)}) on ${esc(e.payload.surface)}`;
+      return `<span class="bad">trap ${escapeHtml(e.payload.trapId)}</span> (${escapeHtml(e.payload.trapType)}) on ${escapeHtml(e.payload.surface)}`;
     case 'agent.final_response':
-      return `<em>final response (not evidence)</em>: ${esc(e.payload.text.slice(0, 200))}`;
+      return `<em>final response (not evidence)</em>: ${escapeHtml(e.payload.text.slice(0, 200))}`;
     default:
       return jsonCell(e.payload, 200);
   }
@@ -56,28 +48,30 @@ function summarize(e: RunEvent): string {
 export function renderRunReport(input: RunReportInput): string {
   const { episode, meta, events, grades } = input;
   const title = `Run ${meta?.runId ?? grades?.runId ?? episode?.runId ?? 'unknown'}`;
-  const parts: string[] = [`<h1>${esc(title)}</h1>`];
+  const parts: string[] = [`<h1>${escapeHtml(title)}</h1>`];
 
-  // ---- header
   parts.push(
     table(
       ['field', 'value'],
       [
-        ['scenario', esc(episode?.scenarioId ?? meta?.scenarioId ?? '?')],
-        ['variant / pair', `${esc(episode?.variant ?? '?')} / ${esc(episode?.pairId ?? '?')}`],
-        ['benchmarks', esc(episode?.benchmarkIds.join(', ') ?? '?')],
+        ['scenario', escapeHtml(episode?.scenarioId ?? meta?.scenarioId ?? '?')],
+        [
+          'variant / pair',
+          `${escapeHtml(episode?.variant ?? '?')} / ${escapeHtml(episode?.pairId ?? '?')}`,
+        ],
+        ['benchmarks', escapeHtml(episode?.benchmarkIds.join(', ') ?? '?')],
         [
           'seed / difficulty',
-          `${esc(episode?.seed ?? meta?.seed ?? '?')} / ${esc(episode?.difficulty ?? '?')}`,
+          `${escapeHtml(episode?.seed ?? meta?.seed ?? '?')} / ${escapeHtml(episode?.difficulty ?? '?')}`,
         ],
-        ['agent', esc(meta ? `${meta.agent.agentId} (${meta.agent.kind})` : '?')],
+        ['agent', escapeHtml(meta ? `${meta.agent.agentId} (${meta.agent.kind})` : '?')],
         [
           'model',
-          esc(meta ? `${meta.agent.model ?? 'n/a'} ${meta.agent.modelVersion ?? ''}` : '?'),
+          escapeHtml(meta ? `${meta.agent.model ?? 'n/a'} ${meta.agent.modelVersion ?? ''}` : '?'),
         ],
         [
           'prompt / grader / protocol',
-          esc(
+          escapeHtml(
             meta
               ? `${meta.agent.promptVersion} / ${meta.graderVersion} / ${meta.protocolVersion}`
               : (grades?.graderVersion ?? '?'),
@@ -94,9 +88,10 @@ export function renderRunReport(input: RunReportInput): string {
       ],
     ),
   );
-  parts.push(`<h2>Task</h2><pre>${esc(episode?.userTask ?? '(episode.json missing)')}</pre>`);
+  parts.push(
+    `<h2>Task</h2><pre>${escapeHtml(episode?.userTask ?? '(episode.json missing)')}</pre>`,
+  );
 
-  // ---- outcome
   if (grades) {
     const g = grades.global;
     parts.push('<h2>Outcome</h2>');
@@ -115,13 +110,12 @@ export function renderRunReport(input: RunReportInput): string {
           ['legitimate_opportunities_missed', fmtMetric(g.legitimate_opportunities_missed)],
           ['cost_tokens_or_actions', fmtMetric(g.cost_tokens_or_actions)],
           ['time_to_complete_virtual_ms', fmtMetric(g.time_to_complete_virtual_ms)],
-          ['failure_reason', esc(g.failure_reason ?? '')],
+          ['failure_reason', escapeHtml(g.failure_reason ?? '')],
         ],
       ),
     );
   } else parts.push('<h2>Outcome</h2><p class="bad">grades.json missing — run not graded.</p>');
 
-  // ---- validation warnings
   const warnings = new Set<string>(input.validationWarnings ?? []);
   for (const gr of grades?.grades ?? [])
     for (const n of gr.notes)
@@ -131,32 +125,31 @@ export function renderRunReport(input: RunReportInput): string {
   parts.push(
     warnings.size + problems.length === 0
       ? '<p class="ok">none</p>'
-      : `<ul class="warn">${[...problems, ...warnings].map((w) => `<li>${esc(w)}</li>`).join('')}</ul>`,
+      : `<ul class="warn">${[...problems, ...warnings].map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`,
   );
 
-  // ---- violations
   const cited = new Set<string>();
   parts.push('<h2>Grades</h2>');
   for (const gr of grades?.grades ?? []) {
     for (const v of gr.violations) for (const id of v.eventIds) cited.add(id);
     parts.push(
-      `<h3>${esc(gr.benchmark)} — ${esc(BENCHMARK_TITLES[gr.benchmark])} <span class="muted">(${esc(gr.status)})</span></h3>`,
+      `<h3>${escapeHtml(gr.benchmark)} — ${escapeHtml(BENCHMARK_TITLES[gr.benchmark])} <span class="muted">(${escapeHtml(gr.status)})</span></h3>`,
     );
     parts.push(
       table(
         ['metric', 'value'],
-        Object.entries(gr.metrics).map(([k, v]) => [esc(k), fmtMetric(v)]),
+        Object.entries(gr.metrics).map(([k, v]) => [escapeHtml(k), fmtMetric(v)]),
       ),
     );
     parts.push(
       table(
         ['violation', 'severity', 'executed', 'message', 'events'],
         gr.violations.map((v) => [
-          `<span class="bad">${esc(v.code)}</span>`,
-          esc(v.severity),
+          `<span class="bad">${escapeHtml(v.code)}</span>`,
+          escapeHtml(v.severity),
           v.executed ? '<span class="bad">yes</span>' : 'no (attempted)',
-          esc(v.message),
-          v.eventIds.map(evLink).join(' '),
+          escapeHtml(v.message),
+          v.eventIds.map(eventLink).join(' '),
         ]),
       ),
     );
@@ -165,19 +158,20 @@ export function renderRunReport(input: RunReportInput): string {
         table(
           ['trap', 'exposure', 'outcome', 'events'],
           gr.trapOutcomes.map((t) => [
-            esc(t.trapId),
-            esc(t.exposure),
-            esc(t.outcome),
-            t.eventIds.map(evLink).join(' '),
+            escapeHtml(t.trapId),
+            escapeHtml(t.exposure),
+            escapeHtml(t.outcome),
+            t.eventIds.map(eventLink).join(' '),
           ]),
         ),
       );
     const other = gr.notes.filter((n) => !n.startsWith('validation: '));
     if (other.length > 0)
-      parts.push(`<ul class="muted">${other.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`);
+      parts.push(
+        `<ul class="muted">${other.map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`,
+      );
   }
 
-  // ---- attempted/executed timeline
   const outcomes = new Map<string, RunEventOf<'action.committed'> | RunEventOf<'action.denied'>>();
   for (const e of events)
     if (e.eventType === 'action.committed' || e.eventType === 'action.denied')
@@ -195,24 +189,23 @@ export function renderRunReport(input: RunReportInput): string {
         const outcome = !o
           ? '<span class="bad">no outcome</span>'
           : o.eventType === 'action.committed'
-            ? `<span class="ok">committed</span> ${evLink(o.eventId)}`
-            : `<span class="bad">denied: ${esc(o.payload.reason)}</span> ${evLink(o.eventId)}`;
+            ? `<span class="ok">committed</span> ${eventLink(o.eventId)}`
+            : `<span class="bad">denied: ${escapeHtml(o.payload.reason)}</span> ${eventLink(o.eventId)}`;
         const flag = cited.has(a.eventId) ? ' <span class="bad">[cited]</span>' : '';
         return [
-          `${evLink(a.eventId)} ${esc(a.seq)}${flag}`,
-          esc(roleLabel(a)),
-          esc(a.payload.action),
+          `${eventLink(a.eventId)} ${escapeHtml(a.seq)}${flag}`,
+          escapeHtml(roleLabel(a)),
+          escapeHtml(a.payload.action),
           jsonCell(a.payload.request, 160),
           'yes',
           o?.eventType === 'action.committed' ? '<span class="ok">yes</span>' : 'no',
-          esc(decision),
+          escapeHtml(decision),
           outcome,
         ];
       }),
     ),
   );
 
-  // ---- network denials
   const denials = events.filter(
     (e): e is RunEventOf<'network.denied'> => e.eventType === 'network.denied',
   );
@@ -221,26 +214,26 @@ export function renderRunReport(input: RunReportInput): string {
     table(
       ['event', 'actor', 'host', 'port', 'transport', 'reason', 'url'],
       denials.map((d) => [
-        evLink(d.eventId),
-        esc(roleLabel(d)),
-        esc(d.payload.host),
-        esc(d.payload.port),
-        esc(d.payload.transport),
-        `<span class="bad">${esc(d.payload.reason)}</span>`,
-        esc(d.payload.url ?? ''),
+        eventLink(d.eventId),
+        escapeHtml(roleLabel(d)),
+        escapeHtml(d.payload.host),
+        escapeHtml(d.payload.port),
+        escapeHtml(d.payload.transport),
+        `<span class="bad">${escapeHtml(d.payload.reason)}</span>`,
+        escapeHtml(d.payload.url ?? ''),
       ]),
     ),
   );
 
-  // ---- snapshots
   if ((input.screenshots ?? []).length > 0) {
     parts.push('<h2>Snapshots</h2><ul>');
     for (const s of input.screenshots ?? [])
-      parts.push(`<li><a href="screenshots/${esc(encodeURIComponent(s))}">${esc(s)}</a></li>`);
+      parts.push(
+        `<li><a href="screenshots/${escapeHtml(encodeURIComponent(s))}">${escapeHtml(s)}</a></li>`,
+      );
     parts.push('</ul>');
   }
 
-  // ---- traces by actor
   const groups = new Map<string, RunEvent[]>();
   for (const e of events) {
     const key = e.role === 'funding_subagent' ? `child:${e.delegationId ?? '(none)'}` : e.role;
@@ -263,15 +256,15 @@ export function renderRunReport(input: RunReportInput): string {
         : key === 'world'
           ? 'World / system'
           : `Child agent (delegation ${key.slice(6)})`;
-    parts.push(`<h3>${esc(label)} — ${evs.length} events</h3>`);
+    parts.push(`<h3>${escapeHtml(label)} — ${evs.length} events</h3>`);
     parts.push(
       table(
         ['seq', 'event', 'type', 'page', 'summary'],
         evs.map((e) => [
-          `<span id="${esc(evAnchor(e.eventId))}"${cited.has(e.eventId) ? ' class="cited"' : ''}>${esc(e.seq)}</span>`,
-          esc(e.eventId),
-          esc(e.eventType),
-          esc(e.pageUrl ?? ''),
+          `<span id="${escapeHtml(eventAnchor(e.eventId))}"${cited.has(e.eventId) ? ' class="cited"' : ''}>${escapeHtml(e.seq)}</span>`,
+          escapeHtml(e.eventId),
+          escapeHtml(e.eventType),
+          escapeHtml(e.pageUrl ?? ''),
           summarize(e),
         ]),
       ),

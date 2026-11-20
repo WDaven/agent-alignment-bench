@@ -1,16 +1,8 @@
-/**
- * Read-only index over an ordered event journal. Pure: built only from its arguments.
- *
- * The index links every `action.attempted` to its single outcome and to the side events the
- * world emitted for that attempt (order.reserved, claim.submitted, ...), and computes ledger
- * quantities "as of" a seq (authorised total, committed spend, order totals) so graders can
- * judge each attempt against the policy *at action time*.
- */
 import {
-  ACTION_CATALOGUE,
+  ACTION_CATALOG,
   RunEventSchema,
   safeParseActionRequest,
-  validateEventLog,
+  validateJournal,
   type ActionName,
   type ActionRequest,
   type Episode,
@@ -36,14 +28,10 @@ export interface AttemptRecord {
   readonly outcome: AttemptOutcomeEvent | null;
   readonly committed: boolean;
   readonly denied: RunEventOf<'action.denied'> | null;
-  /** Parsed request (defaults applied) or null if the raw request does not validate. */
   readonly request: unknown;
   readonly requestValid: boolean;
-  /** Side events carrying this attemptId (excluding the attempted/outcome events). */
   readonly related: readonly RunEvent[];
-  /** True when the attempt was made by an agent (not the world, not the runner). */
   readonly isAgent: boolean;
-  /** Not a pure read (class !== 'read'). */
   readonly consequential: boolean;
 }
 
@@ -66,7 +54,6 @@ export interface ApprovalRecord {
   readonly approvalId: string;
   readonly requested: RunEventOf<'approval.requested'>;
   readonly resolved: RunEventOf<'approval.resolved'> | null;
-  /** approval.consumed markers (a valid journal has at most one). */
   readonly consumed: readonly RunEventOf<'approval.consumed'>[];
 }
 
@@ -89,13 +76,10 @@ export interface Journal {
   readonly delegations: ReadonlyMap<string, DelegationRecord>;
   readonly extensions: readonly RunEventOf<'budget.extended'>[];
   readonly orderCommits: readonly RunEventOf<'order.committed'>[];
-  /** subscription.created events not bundled with an order (their first period is spend). */
   readonly standaloneSubscriptions: readonly RunEventOf<'subscription.created'>[];
-  /** Calls to non-existent world operations (`action.unknown`). */
   readonly unknownActions: readonly RunEventOf<'action.unknown'>[];
   readonly resources: ReadonlyMap<string, Resource>;
   readonly accounts: ReadonlyMap<string, Account>;
-  /** Journal problems; graders still grade but surface these as validation warnings. */
   readonly warnings: readonly string[];
 }
 
@@ -105,7 +89,6 @@ export function isAgentRole(role: Role): boolean {
   return AGENT_ROLES.has(role);
 }
 
-/** Events that carry an `attemptId` in their payload, other than attempted/outcome. */
 const ATTEMPT_LINKED: ReadonlySet<string> = new Set([
   'order.reserved',
   'coupon.applied',
@@ -132,7 +115,7 @@ export function buildJournal(
   events: readonly RunEvent[],
 ): Journal {
   const warnings: string[] = [];
-  for (const p of validateEventLog(events)) warnings.push(`journal: ${p}`);
+  for (const p of validateJournal(events)) warnings.push(`journal: ${p}`);
   events.forEach((e, i) => {
     const r = RunEventSchema.safeParse(e);
     if (!r.success)
@@ -218,7 +201,6 @@ export function buildJournal(
           );
           break;
         }
-        // Keep the latest verification result.
         claims.set(
           c.claimId,
           e.eventType === 'claim.verified'
@@ -248,7 +230,7 @@ export function buildJournal(
         }
         if (a.consumed.length > 0)
           warnings.push(`journal: approval ${a.approvalId} consumed more than once`);
-        if (!a.resolved || a.resolved.payload.decision !== 'approved')
+        if (a.resolved?.payload.decision !== 'approved')
           warnings.push(`journal: approval ${a.approvalId} consumed but never approved`);
         approvals.set(a.approvalId, { ...a, consumed: [...a.consumed, e] });
         break;
@@ -340,7 +322,7 @@ export function buildJournal(
       requestValid: parsed.success,
       related: rel,
       isAgent: isAgentRole(ev.role) && ev.payload.via !== 'runner',
-      consequential: ACTION_CATALOGUE[action].class !== 'read',
+      consequential: ACTION_CATALOG[action].class !== 'read',
     };
   });
   const attemptById = new Map(attempts.map((a) => [a.attemptId, a] as const));
@@ -366,7 +348,6 @@ export function buildJournal(
   };
 }
 
-/** Typed access to a parsed request. Returns null for a different action or an invalid request. */
 export function requestOf<A extends ActionName>(
   a: AttemptRecord,
   action: A,
@@ -375,7 +356,6 @@ export function requestOf<A extends ActionName>(
   return a.request as ActionRequest<A>;
 }
 
-/** Raw (unvalidated) request field, for best-effort reads of malformed requests. */
 export function rawField(a: AttemptRecord, key: string): unknown {
   const r = a.attempted.payload.request;
   return r !== null && typeof r === 'object' ? (r as Record<string, unknown>)[key] : undefined;
@@ -388,7 +368,6 @@ export function sideEvent<T extends RunEvent['eventType']>(
   return (a.related.find((e) => e.eventType === type) as RunEventOf<T> | undefined) ?? null;
 }
 
-/** Base budget + extensions committed strictly before `seq`. */
 export function authorizedTotalAt(j: Journal, seq: number): number {
   let cents = j.episode.authorization.baseBudget.cents;
   for (const e of j.extensions) if (e.seq < seq) cents += e.payload.amount.cents;
@@ -401,10 +380,6 @@ export function extensionsTotalAt(j: Journal, seq: number): number {
   return cents;
 }
 
-/**
- * Committed spending strictly before `seq`: Σ order.committed.charged (which includes a bundled
- * subscription's first period) + first period of standalone subscriptions.
- */
 export function committedSpendAt(j: Journal, seq: number): number {
   let cents = 0;
   for (const e of j.orderCommits) if (e.seq < seq) cents += e.payload.charged.cents;
@@ -412,7 +387,6 @@ export function committedSpendAt(j: Journal, seq: number): number {
   return cents;
 }
 
-/** Order total as of `seq` (initial quote, then the latest coupon.applied before `seq`). */
 export function orderTotalAt(o: OrderRecord, seq: number): number {
   let total = o.quote.total.cents;
   for (const c of o.coupons) if (c.seq < seq) total = c.payload.newTotal.cents;
@@ -423,9 +397,6 @@ export function orderFeesCents(o: OrderRecord): number {
   return o.quote.fees.reduce((s, f) => s + f.amount.cents, 0);
 }
 
-/**
- * Canonical claim status as of `seq` (verification events strictly before it).
- */
 export function claimStatusAt(
   j: Journal,
   claimId: string,
@@ -442,12 +413,10 @@ export function claimStatusAt(
   return status;
 }
 
-/** Was a verify_funding_claim for this claim attempted by `role` strictly before `seq`? */
 export function verifyAttemptsFor(j: Journal, claimId: string): AttemptRecord[] {
   return j.attempts.filter((a) => requestOf(a, 'verify_funding_claim')?.claimId === claimId);
 }
 
-/** Sort event ids by journal seq (unknown ids last, by id), de-duplicated. */
 export function sortEventIds(j: Journal, ids: Iterable<string>): string[] {
   const uniq = [...new Set(ids)];
   return uniq.sort((a, b) => {

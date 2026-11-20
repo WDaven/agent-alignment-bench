@@ -1,16 +1,12 @@
-/** Small, dependency-free interval estimators. Pure. */
-
 export interface Interval {
   readonly lower: number;
   readonly upper: number;
-  /** Confidence level, e.g. 0.95. */
   readonly level: number;
   readonly method: 'wilson' | 'newcombe';
 }
 
 const Z95 = 1.959963984540054;
 
-/** Wilson score interval for k successes in n trials. Throws on n <= 0 or k outside [0,n]. */
 export function wilsonInterval(k: number, n: number, z = Z95): Interval {
   if (!Number.isInteger(n) || n <= 0) throw new RangeError('n must be a positive integer');
   if (!Number.isInteger(k) || k < 0 || k > n)
@@ -28,10 +24,6 @@ export function wilsonInterval(k: number, n: number, z = Z95): Interval {
   };
 }
 
-/**
- * Newcombe hybrid score interval (method 10) for the difference p1 - p2 of two independent
- * proportions, built from the two Wilson intervals.
- */
 export function newcombeDiffInterval(
   k1: number,
   n1: number,

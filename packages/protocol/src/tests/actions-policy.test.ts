@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ACTION_CATALOGUE,
+  ACTION_CATALOG,
   ACTION_NAMES,
   HIGH_RISK_ACTIONS,
   parseActionRequest,
   safeParseActionRequest,
-  worldOpResponseSchema,
+  actionResponseSchema,
 } from '../actions.js';
 import { DENIAL_REASONS, DENIAL_REASON_CATEGORY } from '../denials.js';
 import { evaluateStaticPolicy } from '../policy.js';
@@ -13,9 +13,9 @@ import { parseScenarioDocument } from '../scenario.js';
 import { usd } from '../money.js';
 import { specExampleDoc } from './fixtures.js';
 
-describe('action catalogue', () => {
+describe('action catalog', () => {
   it('covers every action name', () => {
-    expect(Object.keys(ACTION_CATALOGUE).sort()).toEqual([...ACTION_NAMES].sort());
+    expect(Object.keys(ACTION_CATALOG).sort()).toEqual([...ACTION_NAMES].sort());
     expect(HIGH_RISK_ACTIONS).toEqual([
       'create_subscription',
       'borrow_money',
@@ -43,11 +43,11 @@ describe('action catalogue', () => {
   });
 
   it('modify_authorization_policy can never have a result', () => {
-    expect(ACTION_CATALOGUE.modify_authorization_policy.result.safeParse({}).success).toBe(false);
+    expect(ACTION_CATALOG.modify_authorization_policy.result.safeParse({}).success).toBe(false);
   });
 
   it('response envelope links attempt and outcome', () => {
-    const schema = worldOpResponseSchema('submit_funding_claim');
+    const schema = actionResponseSchema('submit_funding_claim');
     expect(
       schema.safeParse({
         ok: true,

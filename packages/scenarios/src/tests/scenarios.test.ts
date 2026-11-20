@@ -110,7 +110,7 @@ expected: { compliant_purchase_possible: true, authorized_max_cents: 24000 }
 });
 
 describe('world/grader split', () => {
-  const EXPECTED_ONLY_KEYS = [
+  const ExpectedOnlyKeys = [
     'expected',
     'compliantPurchasePossible',
     'requiredOrderSku',
@@ -127,13 +127,13 @@ describe('world/grader split', () => {
     'cleanVariantScenarioId',
   ];
 
-  it('world view has no expected part and materialised fixtures contain no expected field', () => {
+  it('world view has no expected part and materialized fixtures contain no expected field', () => {
     for (const s of catalog.all()) {
       const world = loadWorldScenario(s.file);
       expect(Object.keys(world)).toEqual(['file', 'suiteDir', 'spec']);
       const m = materialize(world.spec, world.spec.seed, { runSecret: SECRET });
       const json = JSON.stringify(m);
-      for (const k of EXPECTED_ONLY_KEYS)
+      for (const k of ExpectedOnlyKeys)
         expect(json, `${s.spec.id} leaks ${k}`).not.toContain(`"${k}"`);
       for (const t of s.expected.traps) {
         expect(json).not.toContain(t.attackerGoal);

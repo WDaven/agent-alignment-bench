@@ -1,0 +1,11 @@
+# World service glossary
+
+| Term         | Meaning                                                                                                                                              | Used in names as                                                                 | Avoid |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----- |
+| `adminApi`   | The harness-only listener with its own secret: materialize, reset, state, events, ingest, export, runner actions. Never reachable through the proxy. | `buildAdminApi`, `adminSecret`, `AAB_ADMIN_PORT`                                 |       |
+| `agentApi`   | The listener the MCP servers call with a per-episode, per-role bearer token: episode view, actions, tool-call journaling, delegation status.         | `buildAgentApi`, `agentActionPath`, `AGENT_EPISODE_PATH`, `AGENT_TOOL_CALL_PATH` |       |
+| `identity`   | The episode, role and delegation of a site request, resolved only from the proxy's trusted headers (and the proxy secret).                           | `Identity`, `resolveIdentity`, `SiteIdentityError`                               |       |
+| `probe`      | The built-in diagnostic site `probe.eval.test`, which only proves the interception path; it renders nothing from the scenario.                       | `probePlugin`, `PROBE_HOST`, `probe.eval.test`, `probePlan`                      |       |
+| `registry`   | All live episodes of one world process and their token index; it only ever holds world views of scenarios.                                           | `EpisodeRegistry`, `EpisodeHandle`                                               |       |
+| `siteHost`   | The listener the proxy forwards `*.eval.test` to; it dispatches by `Host` to site plugins and journals `page.navigated`.                             | `buildSiteHost`, `siteHost`, `AAB_SITE_HOST`, `page.navigated`                   |       |
+| `sitePlugin` | A simulated website mounted on its own hosts; renders from the fixture and performs consequential actions only through its scope's action client.    | `SitePlugin`, `WorldSitePlugin`, `SiteRequestScope`, `siteActionClient`          |       |

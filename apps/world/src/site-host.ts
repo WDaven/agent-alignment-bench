@@ -13,14 +13,13 @@ import {
   type SiteRequestInfo,
   type SiteRequestScope,
   type TrapExposureRecorder,
-  type WorldOpCallContext,
-  type WorldOpResponse,
-  type WorldOpsClient,
+  type ActionCallContext,
+  type ActionResponse,
+  type ActionClient,
 } from '@aab/protocol';
 import { siteSeedFor } from '@aab/scenarios';
 import type { EpisodeRegistry } from './registry.js';
 
-/** Site plugins are written against a Fastify instance. */
 export type WorldSitePlugin = SitePlugin<FastifyInstance>;
 
 export class SiteIdentityError extends Error {
@@ -28,11 +27,10 @@ export class SiteIdentityError extends Error {
 }
 
 function one(v: string | string[] | undefined): string | null {
-  if (Array.isArray(v)) return v.length === 1 ? v[0]! : null;
+  if (Array.isArray(v)) return v.length === 1 ? (v[0] ?? null) : null;
   return typeof v === 'string' && v.length > 0 ? v : null;
 }
 
-/** Lower-cased host from a Host header, without port. Null if it is not a valid DNS host. */
 export function hostOf(hostHeader: string | undefined): string | null {
   if (!hostHeader) return null;
   const h = hostHeader.trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
@@ -44,13 +42,12 @@ function hostRegex(hosts: readonly string[]): RegExp {
   return new RegExp(`^(?:${alt})(?::\\d+)?$`, 'i');
 }
 
-/** Role-bound world-ops client handed to site plugins (`via: 'site'`). */
-export function siteOpsClient(
+export function siteActionClient(
   registry: EpisodeRegistry,
   episodeId: string,
   role: AgentRole,
   delegationId: string | null,
-): WorldOpsClient {
+): ActionClient {
   return {
     episodeId,
     role,
@@ -58,8 +55,8 @@ export function siteOpsClient(
     async call<A extends ActionName>(
       action: A,
       request: ActionRequestInput<A>,
-      ctx?: WorldOpCallContext,
-    ): Promise<WorldOpResponse<A>> {
+      ctx?: ActionCallContext,
+    ): Promise<ActionResponse<A>> {
       const h = registry.require(episodeId);
       return h.store.execute(
         {
@@ -71,7 +68,7 @@ export function siteOpsClient(
         },
         action,
         request,
-      ) as WorldOpResponse<A>;
+      ) as ActionResponse<A>;
     },
   };
 }
@@ -83,11 +80,6 @@ function sameSecret(a: string, b: string): boolean {
   );
 }
 
-/**
- * Resolve identity ONLY from the proxy's trusted headers. Throws SiteIdentityError if they are
- * missing, malformed, or name no live episode / delegation, or (when the site host was given a
- * proxy secret) if the request does not carry it — i.e. it did not come through the proxy.
- */
 export function resolveIdentity(
   registry: EpisodeRegistry,
   headers: SiteRequestInfo['headers'],
@@ -119,12 +111,6 @@ interface RequestMeta {
   notFound: boolean;
 }
 
-/**
- * Site host: the listener the MITM proxy forwards `*.eval.test` to. Every request must carry
- * the trusted x-bench-* identity (otherwise 403, nothing journaled); requests are dispatched by
- * `Host` to registered plugins (each plugin's routes are constrained to its hosts); unknown
- * hosts get a 404 page. Every identified request is journaled as `page.navigated`.
- */
 export async function buildSiteHost(
   registry: EpisodeRegistry,
   plugins: readonly WorldSitePlugin[],
@@ -165,23 +151,23 @@ export async function buildSiteHost(
       /html/i.test(String(reply.getHeader('content-type') ?? ''))
     ) {
       const t = /<title>([^<]{0,300})<\/title>/i.exec(payload);
-      m.title = t ? t[1]!.trim() : null;
+      m.title = t?.[1]?.trim() ?? null;
     }
     return payload;
   });
 
   app.addHook('onResponse', async (req, reply) => {
-    let id;
+    let id: ReturnType<typeof resolveIdentity>;
     try {
       id = resolveIdentity(registry, req.headers);
     } catch {
-      return; // unidentified requests were refused and are not journaled
+      return;
     }
     const host = hostOf(req.headers.host);
     if (!host) return;
     const m = meta.get(req);
     const h = registry.get(id.episodeId);
-    if (!h || !h.store.episodeActive) return;
+    if (!h?.store.episodeActive) return;
     h.store.ingest({
       eventType: 'page.navigated',
       role: id.role,
@@ -227,7 +213,7 @@ export async function buildSiteHost(
           episodeId: id.episodeId,
           role: id.role,
           delegationId: id.delegationId,
-          ops: siteOpsClient(registry, id.episodeId, id.role, id.delegationId),
+          actions: siteActionClient(registry, id.episodeId, id.role, id.delegationId),
           fixture,
           traps,
         };
@@ -238,7 +224,6 @@ export async function buildSiteHost(
     };
     const constraint = hostRegex(plugin.hosts);
     await app.register(async (child) => {
-      // Scope every route of this plugin to its own hosts.
       child.addHook('onRoute', (route) => {
         route.constraints = { ...(route.constraints ?? {}), host: constraint };
       });
@@ -270,6 +255,6 @@ export async function buildSiteHost(
 export function escapeHtml(s: string): string {
   return s.replace(
     /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
   );
 }

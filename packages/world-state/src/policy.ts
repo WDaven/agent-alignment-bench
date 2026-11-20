@@ -1,5 +1,5 @@
 import {
-  ACTION_CATALOGUE,
+  ACTION_CATALOG,
   DENIAL_REASON_CATEGORY,
   evaluateStaticPolicy,
   type ActionName,
@@ -10,7 +10,6 @@ import {
 } from '@aab/protocol';
 import { findApplicableApproval } from './projection.js';
 
-/** Who is acting. A child agent bound to a delegation carries its delegationId. */
 export interface Actor {
   role: AgentRole;
   delegationId: string | null;
@@ -25,32 +24,17 @@ export interface Denied {
 
 export type PolicyDecision = { ok: true; approvalId: string | null } | Denied;
 
-/**
- * `authorizationDecision` for a denial (protocol: `denied` for policy denials, `allowed` when
- * policy passed but canonical state made it fail, `not_applicable` for validation/system and
- * for reads).
- */
 export function denial(action: ActionName, reason: DenialReason, message: string): Denied {
   const cat = DENIAL_REASON_CATEGORY[reason];
   const authorizationDecision =
     cat === 'policy'
       ? 'denied'
-      : cat === 'world_state' && ACTION_CATALOGUE[action].class !== 'read'
+      : cat === 'world_state' && ACTION_CATALOG[action].class !== 'read'
         ? 'allowed'
         : 'not_applicable';
   return { ok: false, reason, message, authorizationDecision };
 }
 
-/**
- * Pure policy engine, protocol steps 2–5 for one actor, evaluated at action time against the
- * CURRENT projection:
- *   - delegation binding (child must act inside an active delegation it belongs to),
- *   - forbidden / not allowed / role scope / delegated scope (protocol `evaluateStaticPolicy`),
- *   - approval-required (single-use approval of the same role for the same action).
- *
- * Checkout's approval is resolved by the checkout handler (it needs the order and amount), so
- * for `checkout` this returns `approvalId: null` even when approval is required.
- */
 export function evaluatePolicy(
   policy: AuthorizationPolicy,
   state: WorldState,
@@ -87,7 +71,6 @@ export function evaluatePolicy(
   return { ok: true, approvalId: null };
 }
 
-/** Whether a role could perform `action` at all under the static policy (no state). */
 export function actionPermitted(
   policy: AuthorizationPolicy,
   role: AgentRole,
@@ -96,11 +79,6 @@ export function actionPermitted(
   return evaluateStaticPolicy(policy, role, action).permitted;
 }
 
-/**
- * Budget rule for anything that moves money: `needed` (integer cents) must be <= the remaining
- * authorised amount (base + verified extensions − committed spend), unless an applicable
- * approval with a sufficient granted amount exists AND the policy lets approvals exceed budget.
- */
 export function checkBudget(
   policy: AuthorizationPolicy,
   state: WorldState,

@@ -10,9 +10,9 @@
   },
   "include": [
     "packages/*/src/**/*.test.ts",
-    "packages/*/src/**/__tests__/**/*.ts",
+    "packages/*/src/**/tests/**/*.ts",
     "apps/*/src/**/*.test.ts",
-    "apps/*/src/**/__tests__/**/*.ts",
+    "apps/*/src/**/tests/**/*.ts",
     "tests/**/*.ts",
     "vitest.config.ts"
   ],

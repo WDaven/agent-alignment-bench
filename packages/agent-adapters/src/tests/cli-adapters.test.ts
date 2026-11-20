@@ -69,7 +69,6 @@ function setup(lines: unknown[]) {
     configHome: path.join(dir, 'home'),
     cdpEndpoint: 'http://127.0.0.1:9',
   };
-  // The fake CLI needs its own env vars; they ride along as "extra" diagnostics env.
   const fakeEnv = { FAKE_CLI_SCRIPT: script, FAKE_CLI_RECORD: record };
   const harnessEnv = {
     PATH: process.env.PATH,
@@ -79,7 +78,7 @@ function setup(lines: unknown[]) {
     UNRELATED_SECRET: 'must-not-leak',
   };
   mkdirSync(dir, { recursive: true });
-  writeFileSync(script, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  writeFileSync(script, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
   const read = () =>
     JSON.parse(readFileSync(record, 'utf8')) as {
       argv: string[];
@@ -168,7 +167,6 @@ describe('ClaudeCodeAdapter (fake CLI)', () => {
       costMicroUsd: 12300,
     });
     expect(a.info.modelVersion).toBe('claude-test-1');
-    // built-in tool use observed as an uncontrolled `cli` tool call; MCP calls are not duplicated
     expect(calls).toEqual([
       expect.objectContaining({ server: 'cli', tool: 'Bash', outcome: 'error' }),
     ]);
@@ -205,7 +203,6 @@ describe('ClaudeCodeAdapter (fake CLI)', () => {
     expect(env.UNRELATED_SECRET).toBeUndefined();
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(realpathSync(cwd)).toBe(realpathSync(s.tools.workDir));
-    // transcript is redacted
     const t = readFileSync(s.transcript, 'utf8');
     expect(t).not.toContain('sk-ant-test-key-1234567890');
     expect(t).toContain('[REDACTED]');
@@ -278,7 +275,7 @@ describe('ClaudeCodeAdapter (fake CLI)', () => {
     expect(Date.now() - t0).toBeLessThan(8000);
     const childPid = Number(readFileSync(path.join(s.dir, 'record.json.child'), 'utf8'));
     await new Promise((res) => setTimeout(res, 3500));
-    expect(() => process.kill(childPid, 0)).toThrow(); // grandchild is gone too
+    expect(() => process.kill(childPid, 0)).toThrow();
   }, 20_000);
 
   it('turn limit kills the CLI', async () => {
@@ -414,7 +411,7 @@ describe('CodexAdapter (fake CLI)', () => {
 describe('redact', () => {
   it('removes known values and key-shaped strings', () => {
     expect(redact('a sk-ant-abc123456789 b', [])).toBe('a [REDACTED] b');
-    expect(redact('tok aab_' + 'a'.repeat(64), [])).toBe('tok [REDACTED]');
+    expect(redact(`tok aab_${'a'.repeat(64)}`, [])).toBe('tok [REDACTED]');
     expect(redact('my secret-value-xyz', ['secret-value-xyz'])).toBe('my [REDACTED]');
   });
 });

@@ -1,14 +1,8 @@
 import { z } from 'zod';
 
-/** The only supported currency. Kept as a literal so adding one is a deliberate protocol change. */
 export const CurrencySchema = z.literal('USD');
 export type Currency = z.infer<typeof CurrencySchema>;
 
-/**
- * Integer minor units (cents) with an explicit currency. Never use floats for money.
- * `cents` may be negative only where a field documents it (e.g. deltas); amounts,
- * prices and budgets use {@link NonNegativeMoneySchema}.
- */
 export const MoneySchema = z.strictObject({
   cents: z.number().int().refine(Number.isSafeInteger, 'cents must be a safe integer'),
   currency: CurrencySchema,
@@ -19,7 +13,6 @@ export const NonNegativeMoneySchema = MoneySchema.refine((m) => m.cents >= 0, {
   message: 'amount must be >= 0 cents',
 });
 
-/** Thrown by the money helpers on non-integer cents or mixed currencies. */
 export class MoneyError extends Error {
   override name = 'MoneyError';
 }
@@ -43,7 +36,6 @@ function assertSameCurrency(a: Money, b: Money): void {
   }
 }
 
-/** Construct a USD Money value. Throws on non-integer cents. */
 export function usd(cents: number): Money {
   assertCents(cents);
   return { cents, currency: 'USD' };
@@ -69,12 +61,10 @@ export function subMoney(a: Money, b: Money): Money {
   return { cents, currency: a.currency };
 }
 
-/** Sum of zero or more values (USD zero for an empty list). */
 export function sumMoney(values: readonly Money[]): Money {
   return values.reduce<Money>((acc, v) => addMoney(acc, v), usd(0));
 }
 
-/** Returns -1, 0 or 1. Throws on mixed currencies or non-integer cents. */
 export function compareMoney(a: Money, b: Money): -1 | 0 | 1 {
   assertMoney(a, 'a');
   assertMoney(b, 'b');
@@ -94,7 +84,6 @@ export function maxMoney(a: Money, b: Money): Money {
   return compareMoney(a, b) >= 0 ? a : b;
 }
 
-/** Human-readable, e.g. `$230.00` or `-$4.05`. For display/logging only. */
 export function formatMoney(m: Money): string {
   assertMoney(m, 'm');
   const sign = m.cents < 0 ? '-' : '';

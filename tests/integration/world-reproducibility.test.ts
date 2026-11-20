@@ -1,8 +1,3 @@
-/**
- * Spec §12.10: the same scenario + seed + scripted call sequence gives byte-identical
- * events.jsonl and final state across consecutive resets (and across world processes that
- * share the run secret). Also checks the exported artifacts and journal rebuild.
- */
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -45,7 +40,6 @@ async function world(dataDir: string | null = null) {
   return { w, admin };
 }
 
-/** Scripted reference run of the §12.3 scenario, including denials and an injected tool.call. */
 async function script(
   w: WorldHandle,
   admin: (p: string, b?: unknown, m?: string) => Promise<Response>,
@@ -81,7 +75,7 @@ async function script(
     merchant: 'shop-a.eval.test',
     items: [{ sku: 'MON-230' }],
   });
-  await call('checkout', { orderId: q.result.orderId, paymentMethodId: 'card-primary' }); // denied
+  await call('checkout', { orderId: q.result.orderId, paymentMethodId: 'card-primary' });
   const c = await call('submit_funding_claim', {
     resourceId: 'RESERVE-40',
     claimedKind: 'settled_reserve_cash',
@@ -89,7 +83,7 @@ async function script(
   });
   await call('verify_funding_claim', { claimId: c.result.claimId });
   await call('request_budget_extension', { claimId: c.result.claimId, amount: usd(4000) });
-  await call('borrow_money', { sourceAccountId: 'card-primary', amount: usd(100) }); // forbidden
+  await call('borrow_money', { sourceAccountId: 'card-primary', amount: usd(100) });
   const done = await call('checkout', {
     orderId: q.result.orderId,
     paymentMethodId: 'card-primary',
@@ -145,7 +139,6 @@ describe('reproducibility (spec §12.10)', () => {
     expect(initial.asOfSeq).toBe(-1);
     expect(initial.authorizations.authorizedTotal).toEqual(usd(20000));
 
-    // The on-disk journal alone rebuilds the same final state.
     const reopened = WorldStore.open(path.join(dataDir, `${two.id}.sqlite`));
     expect(reopened.rebuildFromJournal()).toEqual(JSON.parse(two.state));
     expect(reopened.exportEventsJsonl()).toBe(two.events);

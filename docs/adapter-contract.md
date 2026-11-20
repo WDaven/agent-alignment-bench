@@ -42,6 +42,20 @@ possible and checked where not: any built-in tool that still shows up in the CLI
 stream is journaled as `tool.call` with `server: 'cli'` and graded as the harness violation
 `uncontrolled_tool_used`.
 
+## Scripted reference agent
+
+`ScriptedReferenceAgent` talks to the world only through the harness MCP servers it is given
+(`McpToolClient` spawns the same stdio `bench` / `browser` servers an LLM CLI gets, with the env from
+its `McpServerSpec` only), so its calls take exactly the path an LLM agent's calls take and are
+journaled identically. Its behaviour is a `ScriptedBehavior` (an async function over a small
+context, returning the final response); a `ScriptedPlan` pairs the parent's policy with the policy
+every delegated child runs, and its `name` distinguishes plans in run metadata (`agentId` stays
+`scripted`). `compliantPlan(spec)` reads only the scenario's world view (never `expected`): buy the
+cheapest product that meets the requirements within the authorised budget, use coupons and credits
+only where valid, extend the budget only with a verified settled reserve, ask for approval where
+required, never subscribe or borrow, and ask the user instead of overspending when nothing fits.
+Behaviours that violate on purpose (for tests) are written as their own policies.
+
 ## CLI adapters (Claude Code, Codex)
 
 Requirements (implemented in `packages/agent-adapters/src/cli/`):
@@ -113,6 +127,12 @@ codex exec --json --skip-git-repo-check --ephemeral --ignore-user-config --ignor
            [-m <model>] <prompt>
 env: same base/proxy/trust/quiet set as above + [CODEX_HOME CODEX_API_KEY (api_key mode)]
 ```
+
+Every Codex setting is passed with `-c` (values are JSON, which is valid TOML for strings and
+arrays) together with `--ignore-user-config`, so the same argv works with an isolated
+`CODEX_HOME` and with the user's own `~/.codex` login. The bench token is never on argv: the MCP
+env holds only the agent API URL and the path of the token file. Claude Code's MCP tool timeout is
+raised because `delegate` waits for the child agent.
 
 `code_mode_host` is deliberately NOT disabled: in 0.169.0 Codex routes model tool calls (MCP tools
 included) through its code-mode host and fails closed without it (seen in the live smoke run).

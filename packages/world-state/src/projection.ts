@@ -10,22 +10,13 @@ import {
 } from '@aab/protocol';
 import { jsonClone, minC, money } from './util.js';
 
-/**
- * Projection state = the protocol `WorldState` plus a small amount of bookkeeping that the
- * protocol shape has no place for. Both are derived from the journal ONLY (see `applyEvent`),
- * so `replay(events)` always equals the live projection.
- */
 export interface AuxState {
-  /** True after `episode.ended`. */
   episodeEnded: boolean;
-  /** Approval requested but not yet resolved (resolution is the next event). */
   pendingApprovals: Record<
     string,
     { role: AgentRole; payload: EventPayload<'approval.requested'> }
   >;
-  /** `${trapId}\u0000${url}` keys already recorded (exposure is idempotent per (trap, url)). */
   trapExposures: string[];
-  /** Quote expiry per order (OrderState has no field for it). */
   orderExpiry: Record<string, number | null>;
 }
 
@@ -42,7 +33,6 @@ export function resourceStatus(
   return r.usedAmount.cents >= r.amount.cents ? 'used' : 'partially_used';
 }
 
-/** State before any event (asOfSeq = -1). Pure function of the spec. */
 export function initialProjection(spec: ScenarioSpec, episodeId: string): Projection {
   const w = spec.world;
   const lists: Record<'funds' | 'credits' | 'coupons' | 'refunds', ResourceState[]> = {
@@ -95,7 +85,6 @@ export function initialProjection(spec: ScenarioSpec, episodeId: string): Projec
   };
 }
 
-/** Every resource of the projection, regardless of list. */
 export function allResources(w: WorldState): ResourceState[] {
   return [...w.funds, ...w.credits, ...w.coupons, ...w.refunds];
 }
@@ -108,10 +97,6 @@ export function remainingOf(r: ResourceState): number {
   return Math.max(0, r.amount.cents - r.usedAmount.cents);
 }
 
-/**
- * Deterministic credit allocation shared by the planner and the reducer: credits are applied
- * in the order given, each up to its remaining balance, until the total is covered.
- */
 export function allocateCredits(
   w: WorldState,
   resourceIds: readonly string[],
@@ -128,10 +113,6 @@ export function allocateCredits(
   return { allocations, appliedCents: totalCents - left };
 }
 
-/**
- * The approval an action would consume (single-use). Shared by planner and reducer.
- * `approvalId` given => only that one is considered.
- */
 export function findApplicableApproval(
   w: WorldState,
   q: {
@@ -175,11 +156,7 @@ function asAgentRole(role: RunEvent['role']): AgentRole {
   return role;
 }
 
-/**
- * Pure reducer: projection after applying one journal event. Never mutates its input.
- * This is the ONLY place where projected state changes.
- */
-export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): Projection {
+export function applyEvent(prev: Projection, e: RunEvent): Projection {
   const next = jsonClone(prev);
   const w = next.world;
   w.asOfSeq = e.seq;
@@ -219,7 +196,6 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
         at.status = 'committed';
         at.outcomeSeq = e.seq;
       }
-      // Approval consumption is explicit (approval.consumed), never inferred here.
       break;
     }
     case 'action.denied': {
@@ -267,7 +243,6 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
       const p = e.payload;
       const o = w.orders.find((x) => x.orderId === p.orderId);
       if (o) {
-        // Allocation must be computed against the state BEFORE this order consumed anything.
         const alloc = allocateCredits(w, p.creditResourceIds, o.total.cents);
         for (const a of alloc.allocations) updateResource(w, a.resourceId, a.cents);
         for (const d of o.discounts) updateResource(w, d.couponResourceId, d.amount.cents);
@@ -278,7 +253,6 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
         o.approvalId = p.approvalId;
         o.committedAttemptId = p.attemptId;
       }
-      // `charged` already includes a bundled subscription's first period (subscriptionCharge).
       w.authorizations.committedSpend = money(
         w.authorizations.committedSpend.cents + p.charged.cents,
       );
@@ -295,8 +269,6 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
         createdAttemptId: p.attemptId,
       });
       w.subscriptions.sort((a, b) => (a.subscriptionId < b.subscriptionId ? -1 : 1));
-      // A standalone subscription's first period counts against authorised spending. For a
-      // subscription bundled with an order it is already part of order.committed.charged.
       if (p.orderId === null)
         w.authorizations.committedSpend = money(
           w.authorizations.committedSpend.cents + p.terms.price.cents,
@@ -408,7 +380,6 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
       break;
   }
 
-  // Reserved orders whose quote expired (virtual time) can no longer be checked out.
   for (const o of w.orders) {
     const exp = next.aux.orderExpiry[o.orderId];
     if (o.status === 'reserved' && exp != null && w.virtualNowMs > exp) o.status = 'expired';
@@ -417,13 +388,12 @@ export function applyEvent(spec: ScenarioSpec, prev: Projection, e: RunEvent): P
   return next;
 }
 
-/** Fold a whole journal. `replay(spec, id, events).world` must equal the live projection. */
 export function replay(
   spec: ScenarioSpec,
   episodeId: string,
   events: readonly RunEvent[],
 ): Projection {
   let p = initialProjection(spec, episodeId);
-  for (const e of events) p = applyEvent(spec, p, e);
+  for (const e of events) p = applyEvent(p, e);
   return p;
 }

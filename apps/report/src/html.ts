@@ -1,6 +1,4 @@
-/** HTML helpers. Everything that reaches the page goes through `esc` (page text and agent output are untrusted). */
-
-const ESC: Readonly<Record<string, string>> = {
+const HTML_ESCAPES: Readonly<Record<string, string>> = {
   '&': '&amp;',
   '<': '&lt;',
   '>': '&gt;',
@@ -9,22 +7,20 @@ const ESC: Readonly<Record<string, string>> = {
   '`': '&#96;',
 };
 
-export function esc(value: unknown): string {
+export function escapeHtml(value: unknown): string {
   const s =
     value === null || value === undefined ? '' : typeof value === 'string' ? value : String(value);
-  return s.replace(/[&<>"'`]/g, (c) => ESC[c] ?? c);
+  return s.replace(/[&<>"'`]/g, (c) => HTML_ESCAPES[c] ?? c);
 }
 
-/** Anchor id for an event (ids are opaque; encode anyway). */
-export function evAnchor(eventId: string): string {
+export function eventAnchor(eventId: string): string {
   return `ev-${encodeURIComponent(eventId)}`;
 }
 
-export function evLink(eventId: string): string {
-  return `<a href="#${esc(evAnchor(eventId))}">${esc(eventId)}</a>`;
+export function eventLink(eventId: string): string {
+  return `<a href="#${escapeHtml(eventAnchor(eventId))}">${escapeHtml(eventId)}</a>`;
 }
 
-/** Compact JSON for display, truncated. Escaped. */
 export function jsonCell(value: unknown, max = 240): string {
   let s: string;
   try {
@@ -33,7 +29,7 @@ export function jsonCell(value: unknown, max = 240): string {
     s = String(value);
   }
   if (s.length > max) s = `${s.slice(0, max)}…`;
-  return `<code>${esc(s)}</code>`;
+  return `<code>${escapeHtml(s)}</code>`;
 }
 
 export function table(
@@ -42,15 +38,15 @@ export function table(
   cls = '',
 ): string {
   if (rows.length === 0) return '<p class="muted">none</p>';
-  const head = headers.map((h) => `<th>${esc(h)}</th>`).join('');
+  const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
   const body = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('\n');
-  return `<table${cls ? ` class="${esc(cls)}"` : ''}><thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table>`;
+  return `<table${cls ? ` class="${escapeHtml(cls)}"` : ''}><thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table>`;
 }
 
 export function fmtMetric(v: unknown): string {
   if (v === null || v === undefined) return '<span class="muted">null</span>';
-  if (typeof v === 'number') return esc(Number.isInteger(v) ? String(v) : v.toFixed(3));
-  return esc(String(v));
+  if (typeof v === 'number') return escapeHtml(Number.isInteger(v) ? String(v) : v.toFixed(3));
+  return escapeHtml(String(v));
 }
 
 export const STYLE = `
@@ -68,7 +64,7 @@ export function page(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'unsafe-inline'">
-<title>${esc(title)}</title><style>${STYLE}</style></head>
+<title>${escapeHtml(title)}</title><style>${STYLE}</style></head>
 <body>
 ${body}
 </body></html>

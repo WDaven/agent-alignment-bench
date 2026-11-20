@@ -3,19 +3,12 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import type { McpServerSpec } from '@aab/protocol';
 
 export interface ToolResult {
-  /** Concatenated text content. */
   text: string;
   isError: boolean;
-  /** Parsed JSON of the text content, when it is JSON (bench tools always return JSON). */
   json: unknown;
   images: number;
 }
 
-/**
- * Connects to one harness MCP server exactly the way an agent CLI would (stdio child process,
- * with the env from its McpServerSpec only). Used by the scripted reference agent so its calls
- * take the same path as an LLM agent's.
- */
 export class McpToolClient {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;

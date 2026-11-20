@@ -57,6 +57,13 @@ host is denied by default. `AGENT_CLI_QUIET_ENV` additionally asks Claude Code n
   `GIT_SSL_CAINFO`, …) to `ca-bundle.pem` = Node's bundled Mozilla roots (`tls.rootCertificates`)
   - the eval CA, because the CLI must still verify the real model-API certificate inside its
     passthrough tunnel.
+- Implementation rules: `crypto.ts` imports `reflect-metadata` before `@peculiar/x509` (its ASN.1
+  schema decorators need it); CA files are written keys first, certificate last, so a reader that
+  sees the new certificate also sees the new keys; the CN is escaped per RFC 4514; EC P-256 is used
+  because Node TLS, Chromium, rustls (Codex), OpenSSL and Bun all support it. Root validity is
+  `CA_VALIDITY_DAYS` and `ensureCa` renews within `CA_RENEW_BEFORE_DAYS`; the minter caches up to
+  1000 hosts and refreshes leaves within an hour of expiry. `writeTrustBundle` can add the platform
+  store (`includeSystem`), off by default so the bundle is reproducible.
 - **Name constraints protect clients that enforce them** (OpenSSL, Node, rustls, Go, NSS). They do
   not matter for our Chromium, which does not treat the CA as a trust anchor at all (next section).
 
@@ -128,7 +135,10 @@ phishing detection off, Playwright `serviceWorkers: 'block'`, profile deleted on
 - Listeners are added/removed per episode at runtime: in-process `addListener`/`removeListener`
   (local runs), or the token-protected control endpoint (`ProxyConfig.control`, containerised
   proxy, harness network only), which also buffers network events for the runner to journal.
-- Robustness: header/request/handshake/connect/idle timeouts, 16 KiB max header size (`431`),
+- WebSocket relay: client bytes are held until the upstream has switched protocols; an upstream
+  that refuses the upgrade has its response relayed and the connection closed; there are no
+  half-open WebSockets — either side ending tears down both.
+- Robustness: header/request/handshake/connect/idle timeouts (`DEFAULT_TIMEOUTS`), 16 KiB max header size (`431`),
   client aborts propagate upstream, `close()` destroys every open tunnel and connection.
 - Events go to a caller-supplied sink (the world journals them); the proxy keeps no state store.
 
@@ -161,6 +171,23 @@ Only the proxy is on the egress network. The runner mounts only public trust mat
 admin secret and control token (it never holds a CA key or the proxy secret). Verified on macOS
 Docker 28.1.1 with the scripted agent; a real CLI has not been run in the container.
 
+```text
+runner (orchestrator + agent CLI + Chromium)
+  ├─ agent_net (internal) ──► proxy listeners 172.30.0.2:* ──egress──► model API only
+  │                      └──► world agent API 172.30.0.3:7800   (MCP servers, bearer tokens)
+  └─ harness_net (internal) ► world admin API 172.29.0.3:7820    (admin secret)
+                           └► proxy control  172.29.0.2:8090     (control token)
+proxy ── world_net (internal) ──► world site host 172.31.0.3:7810 (proxy secret header)
+```
+
+The static addresses in `docker-compose.yml` must equal `COMPOSE_NET` in
+`apps/runner/src/compose.ts` (asserted by `apps/runner/src/compose.test.ts`). Model credentials
+reach the runner from the host environment at `docker compose run` time and are never baked into
+an image; the world image contains no scenario files and never the `expected` answer key (the
+runner posts the world view of a scenario). The agent CLIs in `docker/runner.Dockerfile` are
+pinned to the versions the adapters and passthrough presets were verified against; bump them
+together with `packages/agent-adapters` and `packages/mitm-proxy/src/policy.ts`.
+
 ## Residual risks (not covered)
 
 - **Provider-side tools.** Model APIs can browse on the provider's side (server-side web search /
@@ -185,6 +212,10 @@ Docker 28.1.1 with the scripted agent; a real CLI has not been run in the contai
 - **Stapled-leaf acceptance** in Chromium (above) if a browser listener is given passthrough rules.
 - **Linux Chromium trust**: exercised only inside the runner container (Playwright 1.65.1 Noble
   image) with the scripted agent; not on a Linux host.
+- **Chromium renderer sandbox is off** (`chromiumSandbox: false`, Playwright's default, made explicit
+  in `launchControlledBrowser`): Ubuntu 23.10+ hosts (including GitHub runners) restrict the
+  unprivileged user namespaces the sandbox needs, and so do containers. Pages come only from the
+  world service, but a renderer exploit would not be contained by the OS sandbox.
 - **h2-only clients** cannot use intercepted hosts (none of ours are h2-only).
 - Timing/size side channels through allowed tunnels; no rate limiting of denied attempts beyond
   journaling.

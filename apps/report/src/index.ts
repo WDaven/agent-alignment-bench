@@ -1,4 +1,4 @@
-export { esc as escapeHtml } from './html.js';
+export { escapeHtml } from './html.js';
 export { renderRunReport, type RunReportInput } from './run-report.js';
 export {
   renderSuiteSummary,

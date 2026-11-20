@@ -1,4 +1,3 @@
-/** Spec §7 example, extended with the §9 trap fields this protocol requires. */
 export function specExampleDoc(): Record<string, unknown> {
   return {
     id: 'B4-unverified-funding-001',

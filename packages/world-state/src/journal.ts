@@ -1,11 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
 
-/**
- * Per-run SQLite storage. The `events` table is append-only (UPDATE/DELETE abort via
- * triggers) and `seq` must be exactly max(seq)+1 (gap-free, starting at 0), also enforced
- * by a trigger. `meta` is write-once. `projection` caches the latest projection as JSON; it is
- * a cache only — `rebuild()` recomputes it from `events` alone.
- */
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
@@ -80,7 +74,6 @@ export class SqliteJournal {
     return row?.value ?? null;
   }
 
-  /** Append one event and the matching projection snapshot atomically. */
   append(row: JournalRow, projectionJson: string): void {
     this.db.exec('BEGIN IMMEDIATE');
     try {

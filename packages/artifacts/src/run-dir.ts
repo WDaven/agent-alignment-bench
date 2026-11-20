@@ -1,12 +1,3 @@
-/**
- * Run directory layout (docs/architecture.md):
- *
- *   runs/<runId>/ episode.json events.jsonl grades.json world-final.json
- *                 trace.zip screenshots/ network.har report.html meta.json
- *
- * JSON is written with sorted keys and LF endings so identical runs are byte-identical.
- * Every write goes through the hidden-data guard.
- */
 import {
   existsSync,
   mkdirSync,
@@ -44,7 +35,6 @@ export const RUN_FILES = {
   screenshots: 'screenshots',
 } as const;
 
-/** Files that must not be written while the agent is live (they derive from hidden data). */
 const POST_RUN_ONLY: ReadonlySet<string> = new Set([RUN_FILES.grades, RUN_FILES.report]);
 
 export class LiveRunWriteError extends Error {
@@ -57,14 +47,10 @@ export function runDirFor(root: string, runId: string): string {
 }
 
 export interface RunArtifactsOptions {
-  /** Parent directory, normally `<repo>/runs`. */
   readonly root: string;
   readonly runId: string;
-  /** Paths an agent can read during the run (work dir, config home...). Always guarded. */
   readonly agentReachablePaths?: readonly string[];
-  /** Distinctive answer-key strings to scan for in any written content. */
   readonly hiddenMarkers?: readonly string[];
-  /** Starts live (default true): the agent may be running. */
   readonly live?: boolean;
 }
 
@@ -89,7 +75,6 @@ export class RunArtifacts {
     return this.isLive;
   }
 
-  /** Mark the agent as finished (true -> false) before writing grades/report. */
   setLive(live: boolean): void {
     this.isLive = live;
   }
@@ -101,12 +86,6 @@ export class RunArtifacts {
     return target;
   }
 
-  /**
-   * Guarded, atomic write of a file inside the run directory.
-   * `check.parsed`: the structured value behind `content` (scanned for hidden keys).
-   * `check.markersOnly`: only scan for explicit hidden markers (agent-supplied payloads such as
-   * raw tool arguments may legitimately contain any key name).
-   */
   writeFile(
     rel: string,
     content: string | Uint8Array,
@@ -142,10 +121,8 @@ export class RunArtifacts {
     return this.writeJson(RUN_FILES.episode, EpisodeSchema.parse(episode));
   }
 
-  /** Replace events.jsonl with the given journal (each event schema-checked). */
   writeEvents(events: readonly RunEvent[]): string {
     const parsed = events.map((e) => RunEventSchema.parse(e));
-    // The world never holds hidden data; raw agent requests may contain any key, so only markers are checked.
     return this.writeFile(RUN_FILES.events, toJsonl(parsed), { markersOnly: true });
   }
 
@@ -170,26 +147,22 @@ export class RunArtifacts {
   }
 
   writeHar(har: string | object): string {
-    // HAR bodies are agent/page traffic: only explicit markers are meaningful.
     return this.writeFile(RUN_FILES.har, typeof har === 'string' ? har : stableStringify(har), {
       markersOnly: true,
     });
   }
 
-  /** `screenshots/<name>`; name must be a plain file name. */
   writeScreenshot(name: string, png: Uint8Array): string {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name))
       throw new Error(`bad screenshot name ${name}`);
     return this.writeFile(path.join(RUN_FILES.screenshots, name), png);
   }
 
-  /** Copy an existing file (e.g. a Playwright trace) into the run directory, guarded. */
   copyIn(rel: string, sourcePath: string): string {
     return this.writeFile(rel, readFileSync(sourcePath));
   }
 }
 
-/** Serialize one event exactly as it appears in events.jsonl (without the newline). */
 export function eventLine(e: RunEvent): string {
   return stableStringifyLine(e);
 }
@@ -205,7 +178,6 @@ export interface RunArtifactsData {
   readonly hasTrace: boolean;
   readonly hasHar: boolean;
   readonly hasReport: boolean;
-  /** Missing or invalid files. Reading never throws for a malformed run. */
   readonly problems: readonly string[];
 }
 
@@ -224,7 +196,6 @@ function readJson<T>(file: string, parse: (v: unknown) => T, problems: string[])
   }
 }
 
-/** Read and schema-validate a run directory. */
 export function readRun(dir: string): RunArtifactsData {
   const problems: string[] = [];
   const f = (n: string) => path.join(dir, n);

@@ -1,12 +1,3 @@
-/**
- * ScriptedReferenceAgent: a deterministic agent used by tests and to validate that a scenario has
- * a compliant path (spec §12, §14). It talks to the world ONLY through the harness MCP servers it
- * is given (the same stdio `bench` / `browser` servers an LLM CLI gets), so its calls take exactly
- * the path an LLM agent's calls take and are journaled identically.
- *
- * Its behaviour is a `ScriptedPolicy`: an async function over a small context. The runner chooses
- * the policy (it knows the scenario); the agent itself only ever sees its AgentEpisodeView.
- */
 import type {
   ActionName,
   ActionRequestInput,
@@ -16,7 +7,7 @@ import type {
   AgentInfo,
   AgentRunResult,
   AgentTools,
-  WorldOpResponse,
+  ActionResponse,
 } from '@aab/protocol';
 import { McpToolClient, type ToolResult } from './mcp-client.js';
 
@@ -26,8 +17,7 @@ export class ScriptStepLimitError extends Error {
   override name = 'ScriptStepLimitError';
 }
 
-/** Result of a bench call: the world response, plus `child` for `delegate`. */
-export type BenchResponse<A extends ActionName> = WorldOpResponse<A> & {
+export type BenchResponse<A extends ActionName> = ActionResponse<A> & {
   child?: {
     status: string;
     finalResponse: string | null;
@@ -42,29 +32,22 @@ export type BenchResponse<A extends ActionName> = WorldOpResponse<A> & {
 
 export interface ScriptedContext {
   readonly view: AgentEpisodeView;
-  /** Call a bench tool (= world operation). Denials are normal return values. */
   bench<A extends ActionName>(action: A, args: ActionRequestInput<A>): Promise<BenchResponse<A>>;
-  /** Call any bench tool name, including names that do not exist (journaled as action.unknown). */
   benchRaw(name: string, args: Record<string, unknown>): Promise<ToolResult>;
-  /** Call a browser tool, e.g. `browser('browser_navigate', { url })`. */
   browser(tool: string, args?: Record<string, unknown>): Promise<ToolResult>;
-  /** Number of tool calls so far. */
   readonly steps: number;
 }
 
-/** Returns the agent's final response. */
-export type ScriptedPolicy = (ctx: ScriptedContext) => Promise<string>;
+export type ScriptedBehavior = (ctx: ScriptedContext) => Promise<string>;
 
-/** Parent policy plus, for delegation, the policy every child of this parent runs. */
 export interface ScriptedPlan {
   readonly name: string;
-  readonly parent: ScriptedPolicy;
-  readonly child?: ScriptedPolicy;
+  readonly parent: ScriptedBehavior;
+  readonly child?: ScriptedBehavior;
 }
 
 export interface ScriptedAgentOptions {
-  policy: ScriptedPolicy;
-  /** Distinguishes plans in run metadata (agentId stays `scripted`). */
+  behavior: ScriptedBehavior;
   planName?: string;
 }
 
@@ -156,7 +139,7 @@ export class ScriptedReferenceAgent implements AgentAdapter {
     });
     const work = (async (): Promise<AgentRunResult> => {
       try {
-        const finalResponse = await this.opts.policy(ctx);
+        const finalResponse = await this.opts.behavior(ctx);
         return { status: 'done', finalResponse, error: null, usage: this.usage() };
       } catch (err) {
         return {

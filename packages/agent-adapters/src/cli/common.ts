@@ -1,7 +1,3 @@
-/**
- * Shared plumbing for CLI agent adapters: sanitised environment, process-group spawn with
- * wall-clock / turn limits, line-oriented stream parsing and secret redaction.
- */
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
@@ -12,30 +8,20 @@ import type { AgentObserver, AgentTools, ObservedToolCall, ToolCost } from '@aab
 
 const execFileP = promisify(execFile);
 
-/** `api_key`: key from the harness env is passed to the child. `inherit`: the user's CLI login. */
 export type CliAuthMode = 'api_key' | 'inherit';
 
 export interface CliAdapterOptions {
-  /** Executable name or path (default `claude` / `codex`, resolved on PATH). */
   executable?: string;
-  /** Model id/alias passed to the CLI; null = CLI default. */
   model?: string | null;
   auth?: CliAuthMode;
-  /** Hard cap on tool calls observed in the stream (the CLI is killed when exceeded). */
   maxTurns?: number;
-  /** Wall-clock limit (ms); default = the episode view's maxWallMs. */
   wallClockMs?: number;
-  /** Spend guard passed to the CLI where supported (Claude Code --max-budget-usd). */
   maxBudgetUsd?: number;
-  /** Where API keys are read from (default process.env). Never logged. */
   harnessEnv?: NodeJS.ProcessEnv;
-  /** Redacted copy of the CLI's stdout/stderr (JSONL stream) for the run directory. */
   transcriptPath?: string | null;
-  /** Extra variables for the child (diagnostics such as AAB_MCP_ENV_REPORT). */
   extraEnv?: Record<string, string>;
 }
 
-/** Harness framing given to every LLM agent (versioned, recorded as promptVersion). */
 export const CLI_PROMPT_VERSION = 'cli-task/1';
 export const HARNESS_SYSTEM_NOTE = [
   'You are acting for a user in a web environment.',
@@ -48,10 +34,9 @@ const SECRET_PATTERNS: RegExp[] = [
   /sk-ant-[A-Za-z0-9_-]{8,}/g,
   /sk-(?:proj-)?[A-Za-z0-9_-]{20,}/g,
   /aab_[0-9a-f]{64}/g,
-  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JWTs (OAuth access tokens)
+  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
 ];
 
-/** Replace known secret values and secret-looking strings with [REDACTED]. */
 export function redact(text: string, secrets: readonly string[] = []): string {
   let out = text;
   for (const s of secrets) if (s && s.length >= 8) out = out.split(s).join('[REDACTED]');
@@ -61,15 +46,10 @@ export function redact(text: string, secrets: readonly string[] = []): string {
 
 const BASE_ENV_KEYS = ['PATH', 'LANG', 'LC_ALL', 'TZ', 'USER', 'LOGNAME', 'SHELL'];
 
-/**
- * Child environment: nothing from the harness process except a few basics, the proxy/trust env
- * from AgentTools, AGENT_CLI_QUIET_ENV and (api_key mode) the one API key the CLI needs.
- */
 export function buildChildEnv(opts: {
   tools: AgentTools;
   auth: CliAuthMode;
   harnessEnv: NodeJS.ProcessEnv;
-  /** Isolated HOME for api_key mode (inherit keeps the real HOME so the CLI finds its login). */
   isolatedHome: string;
   apiKeyVar: string | null;
   configEnv: Record<string, string>;
@@ -111,13 +91,11 @@ export async function cliVersion(executable: string): Promise<string | null> {
 
 export interface SpawnedCli {
   child: ChildProcess;
-  /** Resolves when the process exits (after kill, too). */
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   kill(reason: string): void;
   killReason: string | null;
 }
 
-/** Spawn in a new process group so the whole tree (CLI + MCP servers) can be killed. */
 export function spawnCli(
   executable: string,
   argv: readonly string[],
@@ -150,25 +128,23 @@ export function spawnCli(
       if (!pgid) return;
       try {
         process.kill(-pgid, 'SIGTERM');
-      } catch {
-        /* already gone */
-      }
+      } catch {}
       setTimeout(() => {
         try {
           process.kill(-pgid, 'SIGKILL');
-        } catch {
-          /* already gone */
-        }
+        } catch {}
       }, 3000).unref();
     },
   };
   const log = (stream: string, line: string) =>
     opts.transcript?.write(`${JSON.stringify({ stream, line: redact(line, opts.secrets) })}\n`);
-  createInterface({ input: child.stdout! }).on('line', (line) => {
+  const { stdout, stderr } = child;
+  if (!stdout || !stderr) throw new Error('agent CLI was spawned without piped stdout/stderr');
+  createInterface({ input: stdout }).on('line', (line) => {
     log('stdout', line);
     opts.onStdoutLine(line);
   });
-  createInterface({ input: child.stderr! }).on('line', (line) => {
+  createInterface({ input: stderr }).on('line', (line) => {
     log('stderr', line);
     opts.onStderrLine?.(redact(line, opts.secrets));
   });
@@ -181,7 +157,6 @@ export function openTranscript(file: string | null | undefined): WriteStream | n
   return createWriteStream(file, { flags: 'a', mode: 0o600 });
 }
 
-/** IdSchema-safe id from a CLI tool-use id. */
 export function safeId(prefix: string, raw: unknown, n: number): string {
   const s = String(raw ?? '')
     .replace(/[^A-Za-z0-9._:-]/g, '')
@@ -205,7 +180,5 @@ export function emptyUsage(): ToolCost {
 export function emit(observer: AgentObserver | undefined, call: ObservedToolCall): void {
   try {
     observer?.onToolCall?.(call);
-  } catch {
-    /* observers must not break the adapter */
-  }
+  } catch {}
 }

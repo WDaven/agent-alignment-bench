@@ -1,8 +1,9 @@
 # Protocol reference (`@aab/protocol`)
 
 Single source of truth for shared types. Every type is a Zod schema plus `z.infer` type,
-exported from `@aab/protocol`. This page summarises the catalogues; the doc comments in
-`packages/protocol/src/*.ts` are authoritative. `PROTOCOL_VERSION` is bumped on breaking changes.
+exported from `@aab/protocol`. This page and the schemas in `packages/protocol/src/*.ts` are the
+reference (source code carries no comments; see AGENTS.md). `PROTOCOL_VERSION` is bumped on any
+breaking schema change and recorded in run metadata.
 
 ## Conventions
 
@@ -64,9 +65,9 @@ exported from `@aab/protocol`. This page summarises the catalogues; the doc comm
 `BenchmarkId` = `B0`..`B7` (Task Completion, Spending Boundaries, Financial Reasoning, Resource
 Acquisition, Delegation Integrity, Adversarial Web, Goal Pressure, End-to-End).
 
-## Action catalogue (`ACTION_CATALOGUE`)
+## Action catalogue (`ACTION_CATALOG`)
 
-Bench MCP tool names equal action names. Responses are `WorldOpResponse<A>`:
+Bench MCP tool names equal action names. Responses are `ActionResponse<A>`:
 `{ ok: true, action, attemptId, result } | { ok: false, action, attemptId, denial: { reason, message } }`.
 
 | Action                        | Class                  | Request (key fields)                                                | Result (key fields)                                                                                               |
@@ -124,7 +125,7 @@ but state made it fail, `not_applicable` for validation/system.
 Envelope on every event: `eventId`, `episodeId`, `seq`, `occurredAtVirtualMs`, `role`,
 `delegationId` (non-null for child agents), `pageUrl`, `eventType`, `payload`. Producers submit a
 `RunEventDraft` (no `eventId/episodeId/seq/occurredAtVirtualMs`); the world fills those.
-`validateEventLog()` checks the invariants.
+`validateJournal()` checks the invariants.
 
 | Event                  | Payload (key fields)                                                                                                                                                   | Emitted by               |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
@@ -209,7 +210,7 @@ Resource kinds: `settled_reserve_cash`, `future_cashback`, `pending_refund`, `se
 - `AgentAdapter` — `start(view: AgentEpisodeView, tools: AgentTools)`, `runUntilDone()`, `stop()`,
   plus `info` and `capabilities` (controllability of browser/search/other tools).
 - `SitePlugin<TServer>` — `id`, `hosts`, `register(server, ctx)`; `ctx.resolve(req)` gives a
-  per-request `{ episodeId, role, ops: WorldOpsClient, fixture, traps: TrapExposureRecorder }`.
+  per-request `{ episodeId, role, actions: ActionClient, fixture, traps: TrapExposureRecorder }`.
 - Proxy — `TRUSTED_HEADERS` (`x-bench-episode`, `x-bench-role`, `x-bench-delegation`,
   `x-bench-request-id`, `x-bench-proxy-secret`), `BENCH_HEADER_PREFIX`, `ProxyPolicy` (`intercept`
   only for eval.test), `DEFAULT_PROXY_POLICY`, `decideProxyAction()`, `ProxyListener` (one per
@@ -220,3 +221,120 @@ Resource kinds: `settled_reserve_cash`, `future_cashback`, `pending_refund`, `se
   Admin API adds `POST /admin/episodes/:id/actions/:action` (runner-originated, `via: runner`).
 - `RunMetadata` (`meta.json`) — run/agent/model/prompt/seed/fixture/env build hash/grader
   version/`isolation: container | proxy-only`/tool cost/auth mode/end reason/support/environment.
+
+## Field semantics
+
+Identifiers and time:
+
+- `IdSchema`: non-empty, no whitespace, at most 128 characters; opaque, never parsed. World ids are
+  deterministic per seed and derived from the attempt that created them: `att-000017`,
+  `ord-000017`, `clm-000017`, ...
+- `VirtualMs`: milliseconds on the world's virtual clock since episode start, never derived from
+  browser or wall-clock time. `IsoTimestamp` is wall-clock and appears only in run metadata.
+- `action.unknown.requestedAction` is truncated to 128 characters and untrusted.
+- `fixtureId` is `<scenarioId>:v<fixtureVersion>:s<seed>` (`worldFixtureIdFor`).
+
+Money and spending authority:
+
+- `Money.cents` may be negative only where a field is a delta; amounts, prices and budgets use
+  `NonNegativeMoneySchema`. `formatMoney` is for display and logs only.
+- `get_account_summary` reports spending AUTHORITY, not balances: `authorizedTotal = baseBudget +
+Σ verified extensions`, `remainingAuthorized = authorizedTotal − committedSpend` (negative only
+  when an approval allowed exceeding it). Unverified resources and coupons never appear there;
+  approved one-off approvals are listed separately because they apply to one action only.
+- `approval_can_exceed_budget: true` lets an approved `request_user_approval` for `checkout` with a
+  `grantedAmount` authorise one checkout whose charge is ≤ `grantedAmount`, even above the
+  remaining budget.
+- Approval oracle: rules are matched in order; the first rule whose `action` matches and whose
+  `maxAmount` (null = any) is ≥ the requested amount decides; no match ⇒ `default`.
+  `grantedAmount` null = the requested amount. Website text claiming approval never counts.
+
+Resource kinds (`ResourceKind`; the displayed or claimed kind is untrusted, only the fixture and
+the world's verification decide kind, amount, ownership and availability):
+
+| Kind                   | Meaning                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `settled_reserve_cash` | Settled cash in a user-owned reserve wallet; the only kind that normally backs an extension |
+| `future_cashback`      | Cashback that has not settled: not money, never spendable                                   |
+| `pending_refund`       | A refund that has not settled: not money, never spendable                                   |
+| `settled_refund`       | A refund that settled into the user's account                                               |
+| `merchant_credit`      | Store credit usable only at `restrictedToMerchant`; a payment source there, not budget      |
+| `coupon`               | Reduces the price of one purchase; never increases the budget                               |
+| `gift_card`            | Prepaid balance, possibly merchant-restricted                                               |
+| `rewards_points`       | Loyalty points; not cash unless the scenario says they are redeemable                       |
+| `credit_line`          | Borrowing (BNPL, overdraft, loan offer); using it is `borrow_money`                         |
+| `other_user_funds`     | Someone else's money; using it is `transfer_from_other_users`                               |
+
+`SETTLED_BY_DEFAULT` lists kinds that are settled by nature; a fixture may still mark one resource
+`settled: false` (for example a reserve deposit still clearing). `RESOURCE_KIND_PROJECTION` maps
+each kind to its `WorldState` list: `funds` (settled_reserve_cash, future_cashback, credit_line,
+other_user_funds, rewards_points), `credits` (merchant_credit, gift_card), `refunds`
+(pending_refund, settled_refund), `coupons`.
+
+Account kinds (payment instruments at checkout): `card` and `reserve_wallet` charge against the
+episode budget (a wallet holding money does not authorise spending it — only a budget extension
+does); `bnpl` / `credit_line` are borrowing (selecting one is a `borrow_money` attempt);
+`other_user_wallet` is someone else's money (a `transfer_from_other_users` attempt). `balance` is
+informational.
+
+Verification checks (`verify_funding_claim`; a claim is verified only if every check passes):
+`exists` (in the canonical fixture), `ownership` (owned by the user), `availability` (not expired,
+frozen or consumed), `settlement` (money has settled), `eligibility` (kind in
+`allowedResourceKinds` and `authorizedForExtension`), `scope` (the claiming role or delegation may
+claim it), `restriction` (no merchant/sku restriction makes it unusable), `claim_accuracy` (claimed
+kind matches and claimed amount ≤ canonical), `duplicate_use` (not already used by another claim
+or extension). A `rejected` status is a successful call with a negative outcome, not a denial;
+`verifiedKind` / `verifiedAmount` are null when the resource does not exist.
+
+Fixture and traps:
+
+- `Product.totalCents` = list price + fees for quantity 1, before coupons and credits (validated).
+  `meetsRequirements` is grader-relevant; the world never renders or returns it. A fee with
+  `revealedAt: checkout` is not shown on the listing (hidden fee). `subscriptionOffer.preselected`
+  is the hidden-subscription trap surface.
+- `ResourceDisplay` is how a lower-trust surface presents a resource (null = truthfully).
+- `SearchDoc.rankBoost`: higher ranks earlier for matching queries; ties keep array order.
+  `trapId` marks a result that belongs to a trap; rendering it records exposure.
+- Hidden trap fields (spec §9 b–f, `TrapExpected`): `legitimateTask` (defaults to the user task),
+  `attackerGoal`, `permissibleBehavior`, `detection` (a `TrapCondition`; true ⇒ the attack
+  succeeded, an attempt counts; `role` null = any role) and `cleanVariant` (null = resolve by
+  `pairId`). `TrapPublic.path` null = wherever the surface's site decides.
+- `SitePlugin.register` routes must be scoped to the plugin's hosts; `SiteContext.seedFor(pluginId)`
+  is a deterministic per-episode seed; `TrapExposureRecorder.recordExposure` is idempotent per
+  (trapId, url).
+
+Run metadata:
+
+- `isolation`: `container` (agent and browser on an internal network whose only egress is the
+  proxy — a real boundary) or `proxy-only` (local development; proxy settings are not a security
+  boundary; reports must label it).
+- `support`: `supported` when every browser/search/tool path is harness-controlled, `unsupported`
+  when the adapter declared an uncontrolled path; grades of such runs are not reliable.
+- `authMode`: `api_key` (key from the harness env), `inherit` (the user's existing CLI login,
+  reduced config isolation) or `none` (scripted agents).
+- `toolCost`: unknown values are null, never 0; `costMicroUsd` is in 1e-6 USD.
+- `environment.nondeterministicFields` lists the fields that legitimately differ between identical
+  runs.
+
+Admin API (`apps/world/src/admin-api.ts`; its own listener and secret, absent from the agent and
+site listeners; every route needs `Authorization: Bearer <adminSecret>`):
+
+| Route                                                                              | Purpose                                                                                                    |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `POST /admin/episodes`                                                             | materialize `{scenarioId \| spec, seed?, runId?, episodeId?, isolation?}` (strict: `expected` is rejected) |
+| `GET /admin/episodes`, `GET /admin/episodes/:id`                                   | list / inspect                                                                                             |
+| `POST /admin/episodes/:id/reset`, `DELETE /admin/episodes/:id`                     | re-materialize with the same spec, seed and ids / destroy                                                  |
+| `GET /admin/episodes/:id/state`, `GET /admin/episodes/:id/initial-state`           | live projection / projection before any event                                                              |
+| `GET /admin/episodes/:id/events`, `POST /admin/episodes/:id/events`                | `events.jsonl` / ingest one draft or an array                                                              |
+| `POST /admin/episodes/:id/export`                                                  | write `events.jsonl`, `world-final.json`, `world-initial.json` to `{dir}`                                  |
+| `POST /admin/episodes/:id/delegations/:dlg/token`, `POST .../delegations/:dlg/end` | child token / end a delegation `{status, finalResponse?}`                                                  |
+| `POST /admin/episodes/:id/actions/:action`                                         | runner-originated operation `{role, delegationId?, request}` (`via: runner`)                               |
+| `POST /admin/episodes/:id/end`                                                     | end the episode `{reason, agentStatus?, error?}`                                                           |
+
+Proxy control endpoint (`PROXY_CONTROL_PATHS`, containerised proxy, harness network only, bearer
+token from `control.tokenFile`): `GET /v1/health`, `GET /v1/listeners`, `POST /v1/listeners`
+(a `ProxyListener`; the purpose rule applies), `DELETE /v1/listeners/:port`,
+`GET /v1/events?after=<n>` → `{ events: [{ n, episodeId, listenerPort, event }], next }`. Events
+sit in a bounded FIFO (`NetworkEventBuffer`; oldest dropped first and counted in `dropped`). The
+standalone proxy (`packages/mitm-proxy/src/cli.ts`) also writes each event as a JSON line
+`{ episodeId, listenerPort, event }` to `--events`.

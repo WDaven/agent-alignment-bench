@@ -177,7 +177,7 @@ describe('hidden-data guard', () => {
     ).not.toThrow();
     expect(() =>
       assertNoHiddenLeak(path.join(a.dir, 'x.json'), { expected: {} }, opts),
-    ).not.toThrow(); // not live
+    ).not.toThrow();
     expect(
       () => new RunArtifacts({ root: tmp, runId: 'run-x', agentReachablePaths: [tmp] }),
     ).toThrow(/overlaps/);

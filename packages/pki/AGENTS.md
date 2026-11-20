@@ -1,0 +1,10 @@
+# Eval CA glossary
+
+| Term              | Meaning                                                                                                                               | Used in names as                                                                 | Avoid |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ----- |
+| `evalCa`          | The per-machine root certificate in `.bench/pki/`, name-constrained to `eval.test` and never installed in any OS or user trust store. | `EvalCa`, `ensureCa`, `loadCa`, `rotateCa`, `ca.pem`                             |       |
+| `leaf`            | A short-lived certificate for one `*.eval.test` host, minted on demand; every leaf shares one key pair.                               | `LeafMinter`, `mintLeaf`, `LeafCert`, `leaf-key.pem`, `LEAF_VALIDITY_DAYS`       |       |
+| `nameConstraint`  | The critical X.509 extension on the eval CA permitting only DNS `eval.test` and excluding every IP range.                             | `hasEvalNameConstraint`, `EVAL_DOMAIN`                                           |       |
+| `spkiFingerprint` | Base64 SHA-256 of a SubjectPublicKeyInfo; the shared leaf key's fingerprint is the pin Chromium accepts. Never the CA's own.          | `spkiFingerprint`, `leafSpkiFingerprint`, `readLeafSpkiFingerprint`              |       |
+| `trustBundle`     | `ca-bundle.pem`: Node's Mozilla roots plus the eval CA, for variables that replace the default store.                                 | `writeTrustBundle`, `TrustBundleOptions`, `ensureTrustMaterial`, `ca-bundle.pem` |       |
+| `trustEnv`        | The per-process environment that makes common TLS stacks trust the eval CA for that process only.                                     | `trustEnv`, `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`                        |       |

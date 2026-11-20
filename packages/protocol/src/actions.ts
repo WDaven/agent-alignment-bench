@@ -23,14 +23,6 @@ import {
   VerificationCheckSchema,
 } from './resources.js';
 
-/**
- * Closed catalogue of world operations (spec §6). Every call through the bench tools or a
- * site plugin is journaled as an `action.attempted` event BEFORE policy is evaluated, then
- * exactly one `action.committed` or `action.denied` with the same `attemptId`.
- *
- * The high-risk actions at the end exist so that attempts can be recorded and denied; whether
- * they are ever allowed is decided by the scenario's authorisation policy.
- */
 export const ActionNameSchema = z.enum([
   'search',
   'browse',
@@ -52,10 +44,6 @@ export const ActionNameSchema = z.enum([
 ]);
 export type ActionName = z.infer<typeof ActionNameSchema>;
 export const ACTION_NAMES = ActionNameSchema.options;
-
-// ---------------------------------------------------------------------------
-// Shared commerce shapes
-// ---------------------------------------------------------------------------
 
 export const OrderItemSchema = z.strictObject({
   sku: SkuSchema,
@@ -79,7 +67,6 @@ export const FeeSchema = z.strictObject({
 });
 export type Fee = z.infer<typeof FeeSchema>;
 
-/** A price reduction from a coupon. Reduces this order's total; it never changes the budget. */
 export const DiscountSchema = z.strictObject({
   couponResourceId: ResourceIdSchema,
   code: z.string(),
@@ -94,7 +81,6 @@ export const SubscriptionTermsSchema = z.strictObject({
 });
 export type SubscriptionTerms = z.infer<typeof SubscriptionTermsSchema>;
 
-/** Canonical priced order as computed by the world (never by the page). */
 export const OrderQuoteSchema = z.strictObject({
   orderId: OrderIdSchema,
   merchant: EvalHostSchema,
@@ -102,17 +88,11 @@ export const OrderQuoteSchema = z.strictObject({
   subtotal: NonNegativeMoneySchema,
   discounts: z.array(DiscountSchema),
   fees: z.array(FeeSchema),
-  /** subtotal - discounts + fees. This is what checkout charges (minus applied credits). */
   total: NonNegativeMoneySchema,
-  /** Present when the order includes a recurring subscription (e.g. a pre-ticked add-on). */
   subscription: SubscriptionTermsSchema.nullable(),
   expiresAtVirtualMs: VirtualMsSchema.nullable(),
 });
 export type OrderQuote = z.infer<typeof OrderQuoteSchema>;
-
-// ---------------------------------------------------------------------------
-// Per-action request / result schemas
-// ---------------------------------------------------------------------------
 
 export const SearchRequestSchema = z.strictObject({
   query: z.string().min(1).max(500),
@@ -123,7 +103,6 @@ export const SearchResultItemSchema = z.strictObject({
   url: UrlSchema,
   host: HostSchema,
   title: z.string(),
-  /** Untrusted, site-authored text. */
   snippet: z.string(),
 });
 export const SearchResultSchema = z.strictObject({
@@ -142,11 +121,6 @@ export const BrowseResultSchema = z.strictObject({
 });
 
 export const GetAccountSummaryRequestSchema = z.strictObject({});
-/**
- * Spending AUTHORITY, not balances. Unverified resources never appear here.
- * authorizedTotal = baseBudget + sum(verified extensions); remaining = authorizedTotal - committedSpend.
- * Approved one-off approvals are listed separately because they apply to one action only.
- */
 export const GetAccountSummaryResultSchema = z.strictObject({
   baseBudget: NonNegativeMoneySchema,
   extensionsTotal: NonNegativeMoneySchema,
@@ -165,7 +139,6 @@ export const GetAccountSummaryResultSchema = z.strictObject({
 export const ReserveOrderRequestSchema = z.strictObject({
   merchant: EvalHostSchema,
   items: z.array(OrderItemSchema).min(1).max(20),
-  /** Explicitly opt into a subscription plan offered with the product. */
   subscriptionPlanId: IdSchema.optional(),
 });
 export const ReserveOrderResultSchema = OrderQuoteSchema;
@@ -177,17 +150,13 @@ export const ApplyCouponRequestSchema = z.strictObject({
 export const ApplyCouponResultSchema = z.strictObject({
   orderId: OrderIdSchema,
   discount: DiscountSchema,
-  /** New order total. The authorised budget is unchanged. */
   total: NonNegativeMoneySchema,
 });
 
 export const CheckoutRequestSchema = z.strictObject({
   orderId: OrderIdSchema,
-  /** Account id from the fixture (`world.accounts`). Borrowing/other-user accounts are high-risk. */
   paymentMethodId: IdSchema,
-  /** Merchant credits / gift cards to apply before charging the payment method. */
   creditResourceIds: z.array(ResourceIdSchema).default([]),
-  /** Approval that authorises this checkout above the remaining budget (if the policy allows that). */
   approvalId: ApprovalIdSchema.optional(),
 });
 export const CheckoutResultSchema = z.strictObject({
@@ -195,12 +164,7 @@ export const CheckoutResultSchema = z.strictObject({
   status: z.literal('committed'),
   total: NonNegativeMoneySchema,
   creditsApplied: NonNegativeMoneySchema,
-  /**
-   * Amount charged to the payment method now; this is what counts against authorised spending:
-   * `total - creditsApplied + subscriptionCharge`.
-   */
   charged: NonNegativeMoneySchema,
-  /** First period of a bundled subscription (0 when none). Included in `charged`. */
   subscriptionCharge: NonNegativeMoneySchema,
   paymentMethodId: IdSchema,
   subscriptionId: IdSchema.nullable(),
@@ -211,11 +175,6 @@ export const DiscoverFundsRequestSchema = z.strictObject({
   kinds: z.array(ResourceKindSchema).optional(),
   minAmount: NonNegativeMoneySchema.optional(),
 });
-/**
- * LOWER-TRUST observation: `displayedKind` / `displayedAmount` are how a surface *presents*
- * the resource and may be wrong (e.g. future cashback shown as cash). Use
- * submit_funding_claim + verify_funding_claim to learn the truth.
- */
 export const FundObservationSchema = z.strictObject({
   observationId: IdSchema,
   resourceId: ResourceIdSchema,
@@ -240,26 +199,22 @@ export const SubmitFundingClaimRequestSchema = z.strictObject({
   claimedAmount: NonNegativeMoneySchema,
   evidence: ClaimEvidenceSchema.default({}),
 });
-/** A claim is an assertion, not money. It never changes the budget. */
 export const SubmitFundingClaimResultSchema = z.strictObject({
   claimId: ClaimIdSchema,
   status: z.literal('pending_verification'),
 });
 
 export const VerifyFundingClaimRequestSchema = z.strictObject({ claimId: ClaimIdSchema });
-/** `status: 'rejected'` is a successful verification call with a negative outcome (not a denial). */
 export const VerifyFundingClaimResultSchema = z.strictObject({
   claimId: ClaimIdSchema,
   resourceId: ResourceIdSchema,
   status: z.enum(['verified', 'rejected']),
-  /** Canonical kind/amount; null when rejected for non-existence. */
   verifiedKind: ResourceKindSchema.nullable(),
   verifiedAmount: NonNegativeMoneySchema.nullable(),
   failedChecks: z.array(VerificationCheckSchema),
 });
 
 export const RequestBudgetExtensionRequestSchema = z.strictObject({
-  /** Must reference a claim whose verification status is `verified`. */
   claimId: ClaimIdSchema,
   amount: NonNegativeMoneySchema,
 });
@@ -278,10 +233,6 @@ export const RequestUserApprovalRequestSchema = z.strictObject({
   orderId: OrderIdSchema.optional(),
   justification: z.string().min(1).max(4000),
 });
-/**
- * Decided by the scenario's simulated approval oracle. Website text claiming approval never
- * counts; only an `approved` result here (and its approvalId) does.
- */
 export const RequestUserApprovalResultSchema = z.strictObject({
   approvalId: ApprovalIdSchema,
   decision: z.enum(['approved', 'denied']),
@@ -292,7 +243,6 @@ export const RequestUserApprovalResultSchema = z.strictObject({
 export const DelegateRequestSchema = z.strictObject({
   task: z.string().min(1).max(8000),
   childRole: AgentRoleSchema.exclude(['parent']).default('funding_subagent'),
-  /** Requested scope; must be a subset of `authorization.scopeByRole[childRole]`. */
   scope: z.array(ActionNameSchema).min(1),
 });
 export const DelegateResultSchema = z.strictObject({
@@ -310,7 +260,6 @@ export const ReportedResourceSchema = z.strictObject({
 });
 export const SubmitSubagentReportRequestSchema = z.strictObject({
   delegationId: DelegationIdSchema,
-  /** Free text from the child. UNTRUSTED for the parent: a report is not a verification. */
   summary: z.string().max(16000),
   claimIds: z.array(ClaimIdSchema).default([]),
   reportedResources: z.array(ReportedResourceSchema).default([]),
@@ -329,7 +278,6 @@ export const CreateSubscriptionResultSchema = z.strictObject({
 });
 
 export const BorrowMoneyRequestSchema = z.strictObject({
-  /** Lender / credit-line account id from the fixture. */
   sourceAccountId: IdSchema,
   amount: NonNegativeMoneySchema,
   purpose: z.string().max(2000).optional(),
@@ -353,21 +301,8 @@ export const ModifyAuthorizationPolicyRequestSchema = z.strictObject({
   requestedChange: z.string().min(1).max(4000),
   sourceUrl: UrlSchema.optional(),
 });
-/** Always denied with `policy_immutable`; it can never commit. */
 export const ModifyAuthorizationPolicyResultSchema = z.never();
 
-// ---------------------------------------------------------------------------
-// Catalogue
-// ---------------------------------------------------------------------------
-
-/**
- * - `read`: observes the world; no ledger mutation other than the attempt record.
- * - `commerce`: orders and checkout.
- * - `funding`: claims and budget extensions.
- * - `approval`: simulated user approval oracle.
- * - `delegation`: child-agent lifecycle and reports.
- * - `high_risk`: actions users typically forbid (subscriptions, borrowing, other people's money, policy edits).
- */
 export const ActionClassSchema = z.enum([
   'read',
   'commerce',
@@ -382,12 +317,11 @@ type ActionDef = {
   readonly request: z.ZodType;
   readonly result: z.ZodType;
   readonly class: ActionClass;
-  /** True if committing it can move money / create a financial obligation. */
   readonly movesMoney: boolean;
   readonly description: string;
 };
 
-export const ACTION_CATALOGUE = {
+export const ACTION_CATALOG = {
   search: {
     request: SearchRequestSchema,
     result: SearchResultSchema,
@@ -513,33 +447,29 @@ export const ACTION_CATALOGUE = {
   },
 } as const satisfies Record<ActionName, ActionDef>;
 
-export type ActionCatalogue = typeof ACTION_CATALOGUE;
-/** Parsed (output) request type for an action. */
-export type ActionRequest<A extends ActionName> = z.infer<ActionCatalogue[A]['request']>;
-/** Request type as accepted before defaults are applied. */
-export type ActionRequestInput<A extends ActionName> = z.input<ActionCatalogue[A]['request']>;
-export type ActionResult<A extends ActionName> = z.infer<ActionCatalogue[A]['result']>;
+export type ActionCatalog = typeof ACTION_CATALOG;
+export type ActionRequest<A extends ActionName> = z.infer<ActionCatalog[A]['request']>;
+export type ActionRequestInput<A extends ActionName> = z.input<ActionCatalog[A]['request']>;
+export type ActionResult<A extends ActionName> = z.infer<ActionCatalog[A]['result']>;
 
 export function actionsOfClass(cls: ActionClass): ActionName[] {
-  return ACTION_NAMES.filter((a) => ACTION_CATALOGUE[a].class === cls);
+  return ACTION_NAMES.filter((a) => ACTION_CATALOG[a].class === cls);
 }
 
-/** Actions that are high-risk by nature. Typical scenarios put these in `forbiddenActions`. */
 export const HIGH_RISK_ACTIONS: readonly ActionName[] = actionsOfClass('high_risk');
 
-/** Validate an untrusted request for a given action (applies defaults). */
 export function parseActionRequest<A extends ActionName>(
   action: A,
   request: unknown,
 ): ActionRequest<A> {
-  return ACTION_CATALOGUE[action].request.parse(request) as ActionRequest<A>;
+  return ACTION_CATALOG[action].request.parse(request) as ActionRequest<A>;
 }
 
 export function safeParseActionRequest<A extends ActionName>(
   action: A,
   request: unknown,
 ): { success: true; data: ActionRequest<A> } | { success: false; error: z.ZodError } {
-  const r = ACTION_CATALOGUE[action].request.safeParse(request);
+  const r = ACTION_CATALOG[action].request.safeParse(request);
   return r.success
     ? { success: true, data: r.data as ActionRequest<A> }
     : { success: false, error: r.error };
@@ -549,29 +479,20 @@ export function parseActionResult<A extends ActionName>(
   action: A,
   result: unknown,
 ): ActionResult<A> {
-  return ACTION_CATALOGUE[action].result.parse(result) as ActionResult<A>;
+  return ACTION_CATALOG[action].result.parse(result) as ActionResult<A>;
 }
 
-// ---------------------------------------------------------------------------
-// World-op response envelope
-// ---------------------------------------------------------------------------
-
-/**
- * What every world operation returns. `attemptId` always identifies the journaled attempt,
- * whether it committed or was denied.
- */
-export type WorldOpResponse<A extends ActionName> =
+export type ActionResponse<A extends ActionName> =
   | { ok: true; action: A; attemptId: string; result: ActionResult<A> }
   | { ok: false; action: A; attemptId: string; denial: z.infer<typeof DenialSchema> };
 
-/** Runtime schema for a response to a known action. */
-export function worldOpResponseSchema<A extends ActionName>(action: A) {
+export function actionResponseSchema<A extends ActionName>(action: A) {
   return z.discriminatedUnion('ok', [
     z.strictObject({
       ok: z.literal(true),
       action: z.literal(action),
       attemptId: AttemptIdSchema,
-      result: ACTION_CATALOGUE[action].result,
+      result: ACTION_CATALOG[action].result,
     }),
     z.strictObject({
       ok: z.literal(false),

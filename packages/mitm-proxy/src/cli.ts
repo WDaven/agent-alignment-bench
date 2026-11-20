@@ -1,15 +1,4 @@
 #!/usr/bin/env node
-/**
- * Standalone proxy process (used by docker/proxy.Dockerfile).
- *
- *   node dist/cli.js --config proxy.json [--events events.jsonl|-] [--init-ca]
- *
- * `proxy.json` is a protocol `ProxyConfig`. Listener purpose decides policy: `browser` listeners
- * get the policy minus every passthrough rule. With `control` set, a token-protected control
- * endpoint adds/removes per-episode listeners at runtime and serves buffered network events
- * (`GET /v1/events?after=n`) for the runner to journal. Events are also written as JSON lines
- * `{ episodeId, listenerPort, event }` (a RunEventDraft) to `--events`.
- */
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,9 +20,11 @@ async function main(): Promise<void> {
   if (!values.config) throw new Error('--config <ProxyConfig.json> is required');
   const config = ProxyConfigSchema.parse(JSON.parse(await readFile(values.config, 'utf8')));
   if (values['init-ca']) await ensureTrustMaterial(path.dirname(path.resolve(config.ca.certPath)));
+  const eventsTarget = values.events ?? '-';
   const out =
-    values.events === '-' ? process.stdout : createWriteStream(values.events!, { flags: 'a' });
-  const interceptOnlyPorts = values['intercept-only-ports']!.split(',')
+    eventsTarget === '-' ? process.stdout : createWriteStream(eventsTarget, { flags: 'a' });
+  const interceptOnlyPorts = (values['intercept-only-ports'] ?? '')
+    .split(',')
     .filter(Boolean)
     .map((p) => Number(p));
   const buffer = new NetworkEventBuffer();
@@ -41,7 +32,7 @@ async function main(): Promise<void> {
     interceptOnlyPorts,
     sink: (event, ctx) => {
       buffer.push(event, ctx);
-      out.write(JSON.stringify({ episodeId: ctx.episodeId, listenerPort: ctx.port, event }) + '\n');
+      out.write(`${JSON.stringify({ episodeId: ctx.episodeId, listenerPort: ctx.port, event })}\n`);
     },
     onError: (err, where) => process.stderr.write(`[mitm-proxy] ${where}: ${String(err)}\n`),
   });

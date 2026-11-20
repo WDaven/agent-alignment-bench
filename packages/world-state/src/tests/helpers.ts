@@ -1,7 +1,6 @@
 import { episodeFromSpec, parseScenarioDocument, type ScenarioSpec } from '@aab/protocol';
 import { WorldStore, type ExecuteContext } from '../store.js';
 
-/** A rich clean fixture covering every money type the world handles. */
 export function baseDoc(): Record<string, any> {
   return {
     id: 'WS-test-001',
@@ -138,7 +137,6 @@ export const CHILD: ExecuteContext = {
 
 export const usd = (cents: number) => ({ cents, currency: 'USD' as const });
 
-/** reserve + checkout helper; returns both responses. */
 export function buy(
   store: WorldStore,
   sku: string,

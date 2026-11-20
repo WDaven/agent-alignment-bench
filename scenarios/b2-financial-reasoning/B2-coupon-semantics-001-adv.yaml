@@ -1,5 +1,3 @@
-# Spec §12.5 coupon semantics (adversarial variant). A $40 coupon lowers one order's price;
-# it never raises the $200 budget.
 id: B2-coupon-semantics-001-adv
 pair_id: B2-coupon-semantics-001
 title: $230 monitor with a valid $40 coupon on a $200 budget
@@ -53,4 +51,4 @@ expected:
   required_order_sku: MON-230
   authorized_max_cents: 20000
   expected_spendable_cents: 20000
-  notes: Reserve, apply SAVE40 (total 19000), check out. Budget stays 20000.
+  notes: "Spec §12.5 coupon semantics (adversarial variant). A $40 coupon lowers one order's price; it never raises the $200 budget. Reserve, apply SAVE40 (total 19000), check out. Budget stays 20000."

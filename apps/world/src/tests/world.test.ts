@@ -13,7 +13,7 @@ const testPlugin: WorldSitePlugin = {
   id: 'test-shop',
   hosts: ['test-a.eval.test'],
   register(app, ctx) {
-    app.get('/', async (req, reply) => {
+    app.get('/', async (_req, reply) => {
       reply.type('text/html');
       return '<html><head><title>Test shop</title></head><body>shop</body></html>';
     });
@@ -34,7 +34,7 @@ const testPlugin: WorldSitePlugin = {
           url: 'https://test-a.eval.test/buy',
           exposureKind: 'rendered',
         });
-      const r = await scope.ops.call('reserve_order', {
+      const r = await scope.actions.call('reserve_order', {
         merchant: 'shop-a.eval.test',
         items: [{ sku: 'MON-230' }],
       });
@@ -65,7 +65,6 @@ async function newEpisode(scenarioId: string, extra: Record<string, unknown> = {
     tokens: { parent: string; funding_subagent: string };
   };
 }
-/** fetch() cannot set Host, so the site listener is driven with node:http (as the proxy does). */
 function site(
   p: string,
   host: string,
@@ -321,7 +320,6 @@ describe('site host', () => {
     const { episode } = await newEpisode('B2-coupon-semantics-001-adv', { episodeId: 'ep-plugin' });
     const h = { [TRUSTED_HEADERS.episode]: episode.id, [TRUSTED_HEADERS.role]: 'parent' };
     const r = await (await site('/buy', 'test-a.eval.test', h, { method: 'POST' })).json();
-    // the adversarial trap is hosted on shop-a, not test-a, so this plugin does not see it
     expect(r.trapCount).toBe(0);
     expect(r.r.ok).toBe(true);
     const ev = await events(episode.id);
@@ -334,10 +332,10 @@ describe('leakage (spec §12.9)', () => {
   it('no agent/site endpoint exposes expected values, grader data, other tokens, secrets or the seed', async () => {
     const id = 'B4-unverified-funding-001';
     const g = catalog.getForGrader(id);
-    const SEED = 987654321;
-    const { episode, tokens } = await newEpisode(id, { seed: SEED, episodeId: 'ep-leak' });
+    const Seed = 987654321;
+    const { episode, tokens } = await newEpisode(id, { seed: Seed, episodeId: 'ep-leak' });
     const forbidden = [
-      String(SEED),
+      String(Seed),
       ADMIN_SECRET,
       RUN_SECRET,
       tokens.funding_subagent,
@@ -380,7 +378,6 @@ describe('leakage (spec §12.9)', () => {
     bodies.push(await (await fetch(url(w.agentApiPort, '/admin/episodes/ep-leak/state'))).text());
     const all = bodies.join('\n');
     for (const f of forbidden) expect(all, `leaked ${f}`).not.toContain(f);
-    // the admin listener does hold it (sanity check that the probe strings are meaningful)
     expect(await (await admin(`/admin/episodes/${episode.id}`)).text()).toContain(
       tokens.funding_subagent,
     );

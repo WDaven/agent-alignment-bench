@@ -8,31 +8,20 @@ import {
   type ProxyRule,
 } from '@aab/protocol';
 
-// ---------------------------------------------------------------------------
-// Passthrough presets (blind CONNECT tunnels, never decrypted)
-// ---------------------------------------------------------------------------
-
 export interface PassthroughPreset {
   description: string;
   hosts: readonly string[];
 }
 
-/**
- * Hosts the agent CLIs need to reach their model API and refresh credentials. Determined from the
- * installed binaries (Claude Code 2.1.224, codex-cli 0.169.0): string tables + documented env.
- */
 export const PASSTHROUGH_PRESETS = {
-  /** Claude Code (`claude -p`): Messages API, `/api/oauth/*` on the same host, OAuth token refresh. */
   anthropic: {
     description: 'Claude Code model API + OAuth token refresh',
     hosts: ['api.anthropic.com', 'platform.claude.com', 'console.anthropic.com'],
   },
-  /** Codex (`codex exec`): API-key mode, ChatGPT-login mode (`chatgpt.com/backend-api/codex`), token refresh. */
   openai: {
     description: 'Codex model API (API key or ChatGPT login) + token refresh',
     hosts: ['api.openai.com', 'chatgpt.com', 'auth.openai.com'],
   },
-  /** Only for an interactive first-time `claude` login; not needed for headless runs. */
   'anthropic-interactive-login': {
     description: 'claude.ai OAuth authorize page (interactive login only)',
     hosts: ['claude.ai'],
@@ -45,30 +34,19 @@ export const DEFAULT_PASSTHROUGH_PRESETS: readonly PassthroughPresetName[] = [
   'openai',
 ];
 
-/**
- * Telemetry / update / feature-flag hosts seen in the same binaries. They stay denied; listing them
- * as explicit `deny` rules makes the journal say `denied_by_rule` instead of `host_not_allowed`.
- */
 export const OBSERVED_TELEMETRY_HOSTS = {
   anthropic: [
     'statsig.anthropic.com',
     'http-intake.logs.us5.datadoghq.com',
     'browser-intake-us5-datadoghq.com',
     'cdn.growthbook.io',
-    'downloads.claude.ai', // auto-updater
-    'storage.googleapis.com', // auto-updater (release bucket)
-    'mcp-proxy.anthropic.com', // claude.ai connectors (MCP), not used by the harness
+    'downloads.claude.ai',
+    'storage.googleapis.com',
+    'mcp-proxy.anthropic.com',
   ],
-  openai: [
-    'ab.chatgpt.com', // statsig OTLP metrics
-    'persistent.oaistatic.com', // app/update feed
-  ],
+  openai: ['ab.chatgpt.com', 'persistent.oaistatic.com'],
 } as const;
 
-/**
- * Environment that tells the CLIs not to try telemetry/update traffic in the first place (Claude
- * Code honours these; Codex telemetry is configured in its config.toml `[otel]`, off by default).
- */
 export const AGENT_CLI_QUIET_ENV: Readonly<Record<string, string>> = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   DISABLE_AUTOUPDATER: '1',
@@ -79,21 +57,14 @@ export const AGENT_CLI_QUIET_ENV: Readonly<Record<string, string>> = {
 };
 
 export interface BuildPolicyOptions {
-  /** Presets to tunnel (default `DEFAULT_PASSTHROUGH_PRESETS`). `[]` = no passthrough at all. */
   presets?: readonly PassthroughPresetName[];
-  /** Additional exact passthrough hosts (port 443). */
   extraPassthroughHosts?: readonly string[];
-  /** Hosts to drop from the preset set. */
   removePassthroughHosts?: readonly string[];
-  /** Add explicit deny rules for `OBSERVED_TELEMETRY_HOSTS` (default true). */
   denyTelemetry?: boolean;
-  /** Additional explicit deny hosts (exact). */
   extraDenyHosts?: readonly string[];
-  /** Rules inserted first (highest priority), e.g. test-only routes. */
   prependRules?: readonly ProxyRule[];
 }
 
-/** Build a validated `ProxyPolicy`: intercept *.eval.test, explicit denies, passthrough presets. */
 export function buildProxyPolicy(opts: BuildPolicyOptions = {}): ProxyPolicy {
   const presets = opts.presets ?? DEFAULT_PASSTHROUGH_PRESETS;
   const remove = new Set((opts.removePassthroughHosts ?? []).map((h) => h.toLowerCase()));
@@ -130,27 +101,15 @@ export function buildProxyPolicy(opts: BuildPolicyOptions = {}): ProxyPolicy {
   return ProxyPolicySchema.parse({ rules, defaultAction: 'deny' });
 }
 
-/**
- * The same policy without passthrough rules. Use it for the listener the *browser* talks to, so
- * that the page cannot reach chatgpt.com / claude.ai etc. through the CLI's model-API tunnel.
- */
 export function interceptOnlyPolicy(policy: ProxyPolicy): ProxyPolicy {
   return { ...policy, rules: policy.rules.filter((r) => r.action !== 'passthrough') };
 }
-
-// ---------------------------------------------------------------------------
-// Decisions
-// ---------------------------------------------------------------------------
 
 export type PolicyDecision =
   | { action: 'intercept'; rule: ProxyRule }
   | { action: 'passthrough'; rule: ProxyRule }
   | { action: 'deny'; reason: NetworkDenialReason; rule: ProxyRule | null };
 
-/**
- * Same semantics as protocol's `decideProxyAction` (first match wins, null ports = 443/80, no
- * match = deny) but also says *why* a request is denied.
- */
 export function decide(
   policy: ProxyPolicy,
   host: string,
@@ -169,14 +128,9 @@ export function decide(
   return { action: 'deny', reason: 'host_not_allowed', rule: null };
 }
 
-// ---------------------------------------------------------------------------
-// Host / address helpers
-// ---------------------------------------------------------------------------
-
 const DNS_HOST_RE =
   /^(?=.{1,253}$)([a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9])?)(\.[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9])?)*$/;
 
-/** Lower-case, strip a trailing dot and IPv6 brackets. Returns null for garbage. */
 export function normalizeHost(raw: string): string | null {
   let h = raw.trim().toLowerCase();
   if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
@@ -186,7 +140,6 @@ export function normalizeHost(raw: string): string | null {
   return DNS_HOST_RE.test(h) ? h : null;
 }
 
-/** Parse `host:port` / `[v6]:port` (CONNECT authority or Host header). */
 export function parseAuthority(
   authority: string,
   defaultPort: number | null,
@@ -205,7 +158,7 @@ export function parseAuthority(
     }
   } else {
     const i = a.lastIndexOf(':');
-    if (i >= 0 && a.indexOf(':') !== i) return null; // bare IPv6 without brackets
+    if (i >= 0 && a.indexOf(':') !== i) return null;
     hostPart = i >= 0 ? a.slice(0, i) : a;
     portPart = i >= 0 ? a.slice(i + 1) : undefined;
   }
@@ -250,19 +203,18 @@ for (const [net, prefix] of [
   PRIVATE.addSubnet(net, prefix, 'ipv6');
 }
 
-/** True for loopback, private, link-local, CGNAT, multicast, unspecified (v4, v6, v4-mapped). */
 export function isPrivateAddress(ip: string): boolean {
   const fam = isIP(ip);
   if (fam === 4) return PRIVATE.check(ip, 'ipv4');
   if (fam === 6) {
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
-    if (mapped) return PRIVATE.check(mapped[1]!, 'ipv4');
+    const mappedV4 = mapped?.[1];
+    if (mappedV4 !== undefined) return PRIVATE.check(mappedV4, 'ipv4');
     return PRIVATE.check(ip, 'ipv6');
   }
   return false;
 }
 
-/** `localhost` and `*.localhost` always mean this machine (RFC 6761). */
 export function isLocalhostName(host: string): boolean {
   return host === 'localhost' || host.endsWith('.localhost');
 }

@@ -7,7 +7,6 @@ import { SIGNING_ALGORITHM, x509 } from './crypto.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Default leaf lifetime. Chromium rejects > 398 days; we stay far below. */
 export const LEAF_VALIDITY_DAYS = 7;
 export const LEAF_MAX_VALIDITY_DAYS = 397;
 
@@ -21,7 +20,6 @@ export class LeafHostError extends Error {
   }
 }
 
-/** Lower-case, strip a trailing dot, validate it is a DNS name under eval.test. */
 export function normalizeLeafHost(host: string): string {
   const h = host.trim().toLowerCase().replace(/\.$/, '');
   if (isIP(h) || h.startsWith('[')) throw new LeafHostError(host, 'IP literals are not allowed');
@@ -33,9 +31,7 @@ export function normalizeLeafHost(host: string): string {
 export interface LeafCert {
   host: string;
   certPem: string;
-  /** Shared leaf key (same for every host minted by this CA). */
   keyPem: string;
-  /** Leaf followed by the CA certificate. */
   chainPem: string;
   notBefore: Date;
   notAfter: Date;
@@ -43,18 +39,16 @@ export interface LeafCert {
 
 export interface LeafMinterOptions {
   validityDays?: number;
-  /** Max cached hosts (LRU-ish eviction). Default 1000. */
   cacheSize?: number;
   now?: () => Date;
 }
 
-function randomSerial(): string {
+function randomPositiveSerial(): string {
   const b = randomBytes(16);
-  b[0] = b[0]! & 0x7f || 1;
+  b.writeUInt8(b.readUInt8(0) & 0x7f || 1, 0);
   return b.toString('hex');
 }
 
-/** Mints and caches per-host leaf certificates signed by the eval CA. */
 export class LeafMinter {
   readonly ca: EvalCa;
   private readonly validityDays: number;
@@ -73,12 +67,10 @@ export class LeafMinter {
     this.now = opts.now ?? (() => new Date());
   }
 
-  /** Get (or mint) the leaf for `host`. Throws `LeafHostError` for hosts outside eval.test. */
   async mint(host: string): Promise<LeafCert> {
     const h = normalizeLeafHost(host);
     const cached = this.cache.get(h);
     if (cached) {
-      // Refresh entries that are within an hour of expiry (or that failed).
       return cached.then(
         (leaf) =>
           leaf.notAfter.getTime() - this.now().getTime() > 60 * 60 * 1000 ? leaf : this.fresh(h),
@@ -101,7 +93,6 @@ export class LeafMinter {
     return p;
   }
 
-  /** A ready TLS SecureContext for `host` (leaf + CA chain), cached alongside the leaf. */
   async secureContext(host: string): Promise<tls.SecureContext> {
     const leaf = await this.mint(host);
     const c = this.contexts.get(leaf.host);
@@ -117,7 +108,7 @@ export class LeafMinter {
     const caNotAfter = this.ca.cert.notAfter.getTime();
     const notAfter = new Date(Math.min(now.getTime() + this.validityDays * DAY_MS, caNotAfter));
     const cert = await x509.X509CertificateGenerator.create({
-      serialNumber: randomSerial(),
+      serialNumber: randomPositiveSerial(),
       subject: `CN=${host}`,
       issuer: this.ca.cert.subject,
       notBefore,
@@ -134,7 +125,7 @@ export class LeafMinter {
         await x509.AuthorityKeyIdentifierExtension.create(this.ca.keys.publicKey, false),
       ],
     });
-    const certPem = cert.toString('pem') + '\n';
+    const certPem = `${cert.toString('pem')}\n`;
     return {
       host,
       certPem,
@@ -148,7 +139,6 @@ export class LeafMinter {
 
 const minters = new WeakMap<EvalCa, LeafMinter>();
 
-/** Convenience: mint via a per-CA shared `LeafMinter` (in-memory cache). */
 export function mintLeaf(ca: EvalCa, host: string): Promise<LeafCert> {
   let m = minters.get(ca);
   if (!m) {

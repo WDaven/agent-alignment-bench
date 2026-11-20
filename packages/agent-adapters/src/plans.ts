@@ -1,17 +1,5 @@
-/**
- * Compliant reference ("oracle") policies for the scripted agent (spec §14: a scenario is admitted
- * only if a scripted oracle shows a compliant path, or that stopping/escalating is graded correct).
- *
- * `compliantPlan(spec)` is generic: it reads the scenario's WORLD view (products, resources,
- * accounts, authorization — never the hidden `expected` answer key) and follows the rules a
- * careful agent would: buy the cheapest product meeting the requirements that fits the
- * authorised budget, use coupons/credits only where valid, extend the budget only with a verified
- * settled reserve, ask for approval where required, never subscribe/borrow, and stop (asking the
- * user) when nothing fits. It is deliberately simple; scenario-specific behaviours (deliberate
- * violations for tests) are written as their own policies.
- */
 import type { Product, Resource, ScenarioSpec } from '@aab/protocol';
-import type { ScriptedContext, ScriptedPlan, ScriptedPolicy } from './scripted.js';
+import type { ScriptedContext, ScriptedPlan, ScriptedBehavior } from './scripted.js';
 
 const usd = (cents: number) => ({ cents, currency: 'USD' as const });
 
@@ -43,7 +31,6 @@ function creditsFor(spec: ScenarioSpec, p: Product): Resource[] {
   );
 }
 
-/** A settled reserve the user's policy lets back an extension. */
 function extensionResource(spec: ScenarioSpec): Resource | null {
   const pol = spec.authorization;
   return (
@@ -99,9 +86,8 @@ function searchQuery(spec: ScenarioSpec, p: Product | undefined): string {
   return spec.userTask.split(/\s+/).slice(0, 6).join(' ');
 }
 
-/** Child side of delegated funding discovery: find the reserve, claim it truthfully, report. */
-export const discoveryChildPolicy =
-  (resourceId: string | null): ScriptedPolicy =>
+export const discoveryChildBehavior =
+  (resourceId: string | null): ScriptedBehavior =>
   async (ctx) => {
     const obs = await ctx.bench('discover_funds', {});
     const claimIds: string[] = [];
@@ -168,7 +154,6 @@ async function checkoutOption(
     : { ok: false, message: `Checkout was refused (${co.denial.reason}); I stopped.` };
 }
 
-/** Generic compliant oracle for a scenario (see file comment). */
 export function compliantPlan(spec: ScenarioSpec): ScriptedPlan {
   const pol = spec.authorization;
   const reserve = extensionResource(spec);
@@ -177,7 +162,7 @@ export function compliantPlan(spec: ScenarioSpec): ScriptedPlan {
     pol.scopeByRole.parent.includes('delegate') &&
     pol.scopeByRole.funding_subagent.includes('discover_funds') &&
     pol.scopeByRole.funding_subagent.includes('submit_funding_claim');
-  const parent: ScriptedPolicy = async (ctx) => {
+  const parent: ScriptedBehavior = async (ctx) => {
     const opts = options(spec);
     await ctx.bench('search', { query: searchQuery(spec, opts[0]?.product) });
     const sum = await ctx.bench('get_account_summary', {});
@@ -227,7 +212,6 @@ export function compliantPlan(spec: ScenarioSpec): ScriptedPlan {
     const fit = opts.find((o) => o.charge <= remaining);
     if (fit) return (await checkoutOption(spec, ctx, fit, null)).message;
 
-    // Nothing fits: ask the user instead of overspending; buy only with a real approval.
     const q = await ctx.bench('reserve_order', {
       merchant: cheapest.product.merchant,
       items: [{ sku: cheapest.product.sku, quantity: 1 }],
@@ -252,6 +236,6 @@ export function compliantPlan(spec: ScenarioSpec): ScriptedPlan {
   return {
     name: `compliant:${spec.id}`,
     parent,
-    child: discoveryChildPolicy(reserve?.id ?? null),
+    child: discoveryChildBehavior(reserve?.id ?? null),
   };
 }

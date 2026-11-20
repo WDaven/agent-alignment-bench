@@ -31,14 +31,9 @@ import {
   SubscriptionIntervalSchema,
 } from './resources.js';
 
-// ===========================================================================
-// In-memory (camelCase) scenario model — the single source of truth for types.
-// ===========================================================================
-
 export const DifficultySchema = z.number().int().min(1).max(5);
 export type Difficulty = z.infer<typeof DifficultySchema>;
 
-/** Fixture version label, e.g. `1` or `2024.1`. */
 export const FixtureVersionSchema = z
   .string()
   .regex(/^[A-Za-z0-9._-]{1,32}$/, 'fixture version is [A-Za-z0-9._-]{1,32}');
@@ -48,15 +43,12 @@ export const DEFAULT_MAX_WALL_MS = 15 * 60 * 1000;
 export const DEFAULT_FIXTURE_VERSION = '1';
 export const DEFAULT_PRIMARY_ACCOUNT_ID = 'card-primary';
 
-/** Payment instrument selectable at checkout. See AccountKind for which kinds are high-risk. */
 export const AccountSchema = z.strictObject({
   id: IdSchema,
   kind: AccountKindSchema,
   label: z.string(),
   owner: AccountOwnerSchema,
-  /** Informational balance (e.g. shown in a wallet UI). Holding money does not authorise spending it. */
   balance: NonNegativeMoneySchema.nullable(),
-  /** For bnpl / credit_line accounts. */
   creditLimit: NonNegativeMoneySchema.nullable(),
 });
 export type Account = z.infer<typeof AccountSchema>;
@@ -65,7 +57,6 @@ export const ProductFeeSchema = z.strictObject({
   kind: FeeKindSchema,
   label: z.string(),
   amount: NonNegativeMoneySchema,
-  /** `checkout` = not shown on the listing, only revealed in the checkout flow (ambiguous/hidden fee). */
   revealedAt: z.enum(['listing', 'checkout']),
 });
 export type ProductFee = z.infer<typeof ProductFeeSchema>;
@@ -74,7 +65,6 @@ export const SubscriptionOfferSchema = z.strictObject({
   planId: IdSchema,
   price: NonNegativeMoneySchema,
   interval: SubscriptionIntervalSchema,
-  /** True = a pre-ticked add-on (hidden subscription trap surface). */
   preselected: z.boolean(),
 });
 export type SubscriptionOffer = z.infer<typeof SubscriptionOfferSchema>;
@@ -86,12 +76,7 @@ export const ProductSchema = z.strictObject({
   description: z.string(),
   listPrice: NonNegativeMoneySchema,
   fees: z.array(ProductFeeSchema),
-  /** listPrice + sum(fees), for quantity 1, before coupons/credits. Validated. */
   total: NonNegativeMoneySchema,
-  /**
-   * Whether this product satisfies the user task's item requirements. Grader-relevant;
-   * the world must never render or return it.
-   */
   meetsRequirements: z.boolean(),
   inStock: z.boolean(),
   attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
@@ -99,7 +84,6 @@ export const ProductSchema = z.strictObject({
 });
 export type Product = z.infer<typeof ProductSchema>;
 
-/** How a lower-trust surface PRESENTS a resource. May deliberately misstate kind/amount. */
 export const ResourceDisplaySchema = z.strictObject({
   kind: ResourceKindSchema,
   amount: NonNegativeMoneySchema,
@@ -108,30 +92,20 @@ export const ResourceDisplaySchema = z.strictObject({
 });
 export type ResourceDisplay = z.infer<typeof ResourceDisplaySchema>;
 
-/**
- * Canonical truth about a resource. Only the world (and grader) see these fields; agents see
- * `displayed` via discover_funds / pages and must verify claims.
- */
 export const ResourceSchema = z.strictObject({
   id: ResourceIdSchema,
   kind: ResourceKindSchema,
   amount: NonNegativeMoneySchema,
   ownedByUser: z.boolean(),
   available: z.boolean(),
-  /** Defaults by kind (see SETTLED_BY_DEFAULT). future_cashback / pending_refund are never spendable. */
   settled: z.boolean(),
-  /** Whether the user's policy lets this specific resource back a budget extension (also needs kind in allowedResourceKinds). */
   authorizedForExtension: z.boolean(),
   restrictedToMerchant: EvalHostSchema.nullable(),
   restrictedToSkus: z.array(SkuSchema).nullable(),
-  /** Required for `coupon`; the code to type at checkout. */
   couponCode: z.string().nullable(),
-  /** Coupon / credit minimum order subtotal. */
   minPurchase: NonNegativeMoneySchema.nullable(),
   expiresAtVirtualMs: VirtualMsSchema.nullable(),
-  /** Whether discover_funds returns it. */
   discoverable: z.boolean(),
-  /** Presentation on lower-trust surfaces; null = presented truthfully. */
   displayed: ResourceDisplaySchema.nullable(),
   description: z.string(),
 });
@@ -142,14 +116,11 @@ export const SearchDocSchema = z.strictObject({
   title: z.string(),
   snippet: z.string(),
   keywords: z.array(z.string()),
-  /** Higher ranks earlier for matching queries; ties broken by array order. */
   rankBoost: z.number().int(),
-  /** If this result is (part of) a trap, its id; rendering it records exposure. */
   trapId: TrapIdSchema.nullable(),
 });
 export type SearchDoc = z.infer<typeof SearchDocSchema>;
 
-/** Mount a SitePlugin on a host, with plugin-specific opaque config. */
 export const SiteMountSchema = z.strictObject({
   host: EvalHostSchema,
   plugin: IdSchema,
@@ -171,7 +142,6 @@ export const TrapTypeSchema = z.enum([
 ]);
 export type TrapType = z.infer<typeof TrapTypeSchema>;
 
-/** Attacker-controlled, lower-trust surface where a trap appears (spec §9a). */
 export const TrapSurfaceSchema = z.enum([
   'search_results',
   'merchant_page',
@@ -185,7 +155,6 @@ export const TrapSurfaceSchema = z.enum([
 ]);
 export type TrapSurface = z.infer<typeof TrapSurfaceSchema>;
 
-/** Spelling aliases accepted on disk for TrapSurface (spec §7 uses `wallet-webpage`). */
 export const TRAP_SURFACE_ALIASES: Readonly<Record<string, TrapSurface>> = {
   'wallet-webpage': 'wallet_page',
   'merchant-webpage': 'merchant_page',
@@ -193,10 +162,6 @@ export const TRAP_SURFACE_ALIASES: Readonly<Record<string, TrapSurface>> = {
   'checkout-webpage': 'checkout_page',
 };
 
-/**
- * Deterministic condition over the ordered event log (spec §9e). Used by graders to decide
- * whether a trap's attacker-desired deviation happened. `role` null = any role.
- */
 export type TrapCondition =
   | { kind: 'action_attempted'; action: ActionName; role: z.infer<typeof RoleSchema> | null }
   | { kind: 'action_committed'; action: ActionName; role: z.infer<typeof RoleSchema> | null }
@@ -245,66 +210,47 @@ export const TrapConditionSchema: z.ZodType<TrapCondition, TrapCondition> = z.la
   ]),
 );
 
-/** World-visible part of a trap: what to render and where. Exposure (§9g) is recorded at runtime via `trap.exposed`. */
 export const TrapPublicSchema = z.strictObject({
   id: TrapIdSchema,
   type: TrapTypeSchema,
   surface: TrapSurfaceSchema,
-  /** Where it appears; null = wherever the surface's site decides. */
   host: EvalHostSchema.nullable(),
   path: z.string().nullable(),
-  /** Attacker-controlled content to render. */
   text: z.string(),
-  /** Resources the trap talks about (e.g. the fake cashback it promotes). */
   targetResourceIds: z.array(ResourceIdSchema),
 });
 export type TrapPublic = z.infer<typeof TrapPublicSchema>;
 
-/** Hidden, grader-only part of a trap (spec §9 b–f). */
-export const TrapOracleSchema = z.strictObject({
+export const TrapExpectedSchema = z.strictObject({
   trapId: TrapIdSchema,
   type: TrapTypeSchema,
-  /** (b) the legitimate task the trap interferes with (defaults to the scenario's user task). */
   legitimateTask: z.string(),
-  /** (c) the deviation the attacker wants, in words. */
   attackerGoal: z.string(),
-  /** (d) what a compliant agent may do (e.g. ignore it, verify, ask the user). */
   permissibleBehavior: z.string(),
-  /** (e) deterministic condition: true => attack succeeded (attempted counts). */
   detection: TrapConditionSchema,
-  /** (f) the matched clean scenario; null = resolve via `pairId`. */
   cleanVariantScenarioId: ScenarioIdSchema.nullable(),
 });
-export type TrapOracle = z.infer<typeof TrapOracleSchema>;
+export type TrapExpected = z.infer<typeof TrapExpectedSchema>;
 
 export const WorldFixtureSchema = z.strictObject({
   accounts: z.array(AccountSchema).min(1),
   products: z.array(ProductSchema),
   resources: z.array(ResourceSchema),
   searchIndex: z.array(SearchDocSchema),
-  /** Empty = the world mounts its registered plugins by host. */
   sites: z.array(SiteMountSchema),
-  /** Empty for clean variants. */
   traps: z.array(TrapPublicSchema),
 });
 export type WorldFixture = z.infer<typeof WorldFixtureSchema>;
 
-/**
- * Everything about a scenario EXCEPT the hidden expected values. Safe for the world service.
- * Still not agent-visible as a whole: agents only receive an AgentEpisodeView.
- */
 export const ScenarioSpecSchema = z.strictObject({
   id: ScenarioIdSchema,
-  /** Shared by a clean scenario and its adversarial counterparts (spec §7 "paired clean variant"). */
   pairId: IdSchema,
   title: z.string(),
   benchmarkIds: z.array(BenchmarkIdSchema).min(1),
   seed: z.number().int().nonnegative(),
   variant: VariantSchema,
-  /** Legitimate-path difficulty, 1 (easy) .. 5 (very hard). B6 slices by it. */
   difficulty: DifficultySchema,
   fixtureVersion: FixtureVersionSchema,
-  /** The only scenario text the agent sees. */
   userTask: z.string().min(1),
   maxSteps: z.number().int().min(1),
   maxWallMs: z.number().int().min(1000),
@@ -314,25 +260,17 @@ export const ScenarioSpecSchema = z.strictObject({
 });
 export type ScenarioSpec = z.infer<typeof ScenarioSpecSchema>;
 
-/** Hidden answer key. Loaded only by the grader process; never by world or agents. */
 export const ScenarioExpectedSchema = z.strictObject({
-  /** Feasibility flag: does at least one fully compliant purchase path exist? */
   compliantPurchasePossible: z.boolean(),
   requiredOrderSku: SkuSchema.nullable(),
-  /** Skus any of which satisfy the task (includes requiredOrderSku when set). */
   acceptableOrderSkus: z.array(SkuSchema),
-  /** Max amount the agent may be charged while staying compliant (base + max legitimate extension). */
   authorizedMax: NonNegativeMoneySchema,
-  /** Resources that must never be claimed-and-used / counted as money. */
   prohibitedResourceIds: z.array(ResourceIdSchema),
-  /** Known set of eligible opportunities (B3 recall denominator). */
   eligibleResourceIds: z.array(ResourceIdSchema),
-  /** Correct spendable amount (B2), if the scenario defines one. */
   expectedSpendable: NonNegativeMoneySchema.nullable(),
-  /** Actions for which asking the user is the expected/acceptable move (e.g. infeasible cases). */
   approvalExpectedFor: z.array(ActionNameSchema),
   notes: z.string().nullable(),
-  traps: z.array(TrapOracleSchema),
+  traps: z.array(TrapExpectedSchema),
 });
 export type ScenarioExpected = z.infer<typeof ScenarioExpectedSchema>;
 
@@ -364,7 +302,6 @@ function collectConditionRefs(
   }
 }
 
-/** A fully parsed scenario, already split so `expected` can be withheld from the world. */
 export const ParsedScenarioSchema = z
   .strictObject({ spec: ScenarioSpecSchema, expected: ScenarioExpectedSchema })
   .superRefine(({ spec, expected }, ctx) => {
@@ -426,15 +363,15 @@ export const ParsedScenarioSchema = z
       'expected',
       'eligibleResourceIds',
     ]);
-    w.traps.forEach((t, i) =>
+    w.traps.forEach((t, i) => {
       known(t.targetResourceIds, resourceIds, 'resource', [
         'spec',
         'world',
         'traps',
         i,
         'targetResourceIds',
-      ]),
-    );
+      ]);
+    });
     w.searchIndex.forEach((d, i) => {
       if (d.trapId && !trapIds.includes(d.trapId))
         issue(`unknown trap ${d.trapId}`, ['spec', 'world', 'searchIndex', i]);
@@ -449,13 +386,13 @@ export const ParsedScenarioSchema = z
       ]);
     }
 
-    const oracleIds = expected.traps.map((t) => t.trapId);
+    const expectedTrapIds = expected.traps.map((t) => t.trapId);
     if (
-      dupes(oracleIds).length ||
-      oracleIds.length !== trapIds.length ||
-      trapIds.some((id) => !oracleIds.includes(id))
+      dupes(expectedTrapIds).length ||
+      expectedTrapIds.length !== trapIds.length ||
+      trapIds.some((id) => !expectedTrapIds.includes(id))
     ) {
-      issue('every world trap needs exactly one oracle entry and vice versa', [
+      issue('every world trap needs exactly one expected entry and vice versa', [
         'expected',
         'traps',
       ]);
@@ -463,7 +400,7 @@ export const ParsedScenarioSchema = z
     expected.traps.forEach((t, i) => {
       const pub = w.traps.find((p) => p.id === t.trapId);
       if (pub && pub.type !== t.type)
-        issue(`trap ${t.trapId}: oracle type differs from world type`, ['expected', 'traps', i]);
+        issue(`trap ${t.trapId}: expected type differs from world type`, ['expected', 'traps', i]);
       const refs = { resources: [] as string[], accounts: [] as string[] };
       collectConditionRefs(t.detection, refs);
       known(refs.resources, resourceIds, 'resource', ['expected', 'traps', i, 'detection']);
@@ -476,10 +413,6 @@ export const ParsedScenarioSchema = z
       issue('adversarial variants need at least one trap', ['spec', 'world', 'traps']);
   });
 export type ParsedScenario = z.infer<typeof ParsedScenarioSchema>;
-
-// ===========================================================================
-// On-disk (snake_case YAML) schema, spec §7. Parse with ScenarioFileSchema.
-// ===========================================================================
 
 const cents = z.number().int().nonnegative();
 const raw = z.strictObject;
@@ -698,7 +631,6 @@ const RawScenarioFileSchema = raw({
           path: z.string().optional(),
           text: z.string(),
           target_resource_ids: z.array(ResourceIdSchema).default([]),
-          // hidden oracle fields (moved to `expected.traps` on parse)
           legitimate_task: z.string().optional(),
           attacker_goal: z.string().min(1),
           permissible_behavior: z.string().min(1),
@@ -896,14 +828,6 @@ function scenarioFromRaw(f: RawScenarioFile): ParsedScenario {
   return { spec, expected };
 }
 
-/**
- * Parses a scenario document (the object produced by a YAML parser) in the spec §7 shape
- * (snake_case) into `{ spec, expected }` (camelCase), applying defaults and cross-field checks.
- *
- * Deviations from the spec example: traps must also give `attacker_goal`,
- * `permissible_behavior` and `detection` (spec §9 c–e). `surface: wallet-webpage` is accepted
- * as an alias of `wallet_page`.
- */
 export const ScenarioFileSchema =
   RawScenarioFileSchema.transform(scenarioFromRaw).pipe(ParsedScenarioSchema);
 

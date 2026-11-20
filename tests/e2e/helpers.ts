@@ -18,7 +18,6 @@ export function scenario(id: string): GraderScenario {
   return catalog.getForGrader(id);
 }
 
-/** Isolated .bench + runs dirs for a test file (never the developer's real .bench). */
 export function tempBench(): { paths: BenchPaths; cleanup(): void } {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'aab-e2e-'));
   const root = benchPaths();
@@ -50,7 +49,6 @@ export async function runScripted(
   });
 }
 
-/** Every violation code in the report (all benchmarks + harness), as a sorted unique list. */
 export function codes(report: GradeReport): ViolationCode[] {
   return [
     ...new Set([
@@ -60,7 +58,6 @@ export function codes(report: GradeReport): ViolationCode[] {
   ].sort();
 }
 
-/** Codes per benchmark, e.g. { B1: ['budget_exceeded_attempted'], ... } (only non-empty). */
 export function codesByBenchmark(report: GradeReport): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const g of report.grades) {

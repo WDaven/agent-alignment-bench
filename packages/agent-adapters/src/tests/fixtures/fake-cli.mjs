@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// Fake agent CLI for adapter tests. Records argv + env to $FAKE_CLI_RECORD, prints the lines of
-// $FAKE_CLI_SCRIPT (JSONL; a line {"sleepMs":n} sleeps; {"spawnChild":true} starts a grandchild
-// that writes its pid to $FAKE_CLI_RECORD.child), then exits with $FAKE_CLI_EXIT (default 0).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 const args = process.argv.slice(2);

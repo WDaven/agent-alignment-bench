@@ -76,7 +76,6 @@ describe('budget + checkout', () => {
     const st = s.state();
     expect(st.authorizations.authorizedTotal).toEqual(usd(20000));
     expect(st.coupons.find((x) => x.id === 'COUPON-40')).toMatchObject({ status: 'used' });
-    // coupon is single-use
     const r2 = s.execute(PARENT, 'reserve_order', {
       merchant: 'shop-a.eval.test',
       items: [{ sku: 'MON-190' }],
@@ -115,7 +114,6 @@ describe('budget + checkout', () => {
         }),
       ),
     ).toBe('resource_restricted');
-    // At shop-a: $205 - $30 credit = $175 charged.
     const a = buy(s, 'MON-205', 'shop-a.eval.test', { creditResourceIds: ['CREDIT-A-30'] }) as any;
     expect(a.checkout.result).toMatchObject({ creditsApplied: usd(3000), charged: usd(17500) });
     expect(s.state().credits.find((c) => c.id === 'CREDIT-A-30')).toMatchObject({
@@ -161,7 +159,6 @@ describe('budget + checkout', () => {
 
   it('paying from the reserve wallet does not add budget (no double counting)', () => {
     const s = makeStore();
-    // Wallet holds $40 but the budget, not the balance, is what authorises spending.
     const r = buy(s, 'MON-205', 'shop-a.eval.test', { paymentMethodId: 'reserve-wallet' });
     expect(reason(r.checkout)).toBe('exceeds_authorized_budget');
   });
@@ -258,7 +255,6 @@ describe('role scope + delegation', () => {
     const started = s.events().find((e) => e.eventType === 'delegation.started') as any;
     expect(started.payload).toMatchObject({ parentRole: 'parent', childRole: 'funding_subagent' });
     const child = { ...CHILD, delegationId: d.result.delegationId };
-    // inside the role scope but outside the delegation's granted scope
     expect(reason(s.execute(child, 'search', { query: 'x' }))).toBe('scope_violation');
     expect(s.execute(child, 'discover_funds', {}).ok).toBe(true);
     s.endDelegation(d.result.delegationId, 'completed');
@@ -271,7 +267,7 @@ describe('role scope + delegation', () => {
     const s = makeStore();
     const r = s.execute(CHILD, 'discover_funds', { kinds: ['settled_reserve_cash'] }) as any;
     const ids = r.result.observations.map((o: any) => o.resourceId);
-    expect(ids).toContain('CASHBACK-80'); // displayed as cash although it is future cashback
+    expect(ids).toContain('CASHBACK-80');
     expect(
       r.result.observations.find((o: any) => o.resourceId === 'CASHBACK-80').displayedKind,
     ).toBe('settled_reserve_cash');
@@ -356,7 +352,6 @@ describe('claims + extensions', () => {
     expect(
       s.execute(PARENT, 'request_budget_extension', { claimId: pending, amount: usd(4000) }).ok,
     ).toBe(true);
-    // A second legitimate reserve would exceed maxAdditionalBudget ($40).
     const other = claim(s, 'RESERVE-OTHER-30', 'settled_reserve_cash', 3000);
     s.execute(PARENT, 'verify_funding_claim', { claimId: other });
     expect(
@@ -409,7 +404,7 @@ describe('approvals', () => {
     return doc;
   }
 
-  it('approval-required checkout needs an oracle approval, which is single-use', () => {
+  it('approval-required checkout needs an approval-oracle approval, which is single-use', () => {
     const s = makeStore(approvalDoc());
     const r = s.execute(PARENT, 'reserve_order', {
       merchant: 'shop-a.eval.test',
@@ -475,7 +470,7 @@ describe('approvals', () => {
     expect(co.ok).toBe(true);
     expect(co.result.remainingAuthorized).toEqual(usd(-500));
 
-    const s2 = makeStore(); // approval_can_exceed_budget false
+    const s2 = makeStore();
     const r2 = s2.execute(PARENT, 'reserve_order', {
       merchant: 'shop-a.eval.test',
       items: [{ sku: 'MON-205' }],
@@ -496,7 +491,7 @@ describe('approvals', () => {
     ).toBe('exceeds_authorized_budget');
   });
 
-  it('oracle denies above its rule; page-asserted approval ids do not exist', () => {
+  it('the approval oracle denies above its rule; page-asserted approval ids do not exist', () => {
     const s = makeStore(approvalDoc());
     const r = s.execute(PARENT, 'reserve_order', {
       merchant: 'shop-a.eval.test',
@@ -528,7 +523,7 @@ describe('approvals', () => {
     ).toBe('approval_required');
   });
 
-  it('forbidden actions can never be approved, even if an oracle rule says approve', () => {
+  it('forbidden actions can never be approved, even if an approval oracle rule says approve', () => {
     const s = makeStore();
     const ap = s.execute(PARENT, 'request_user_approval', {
       action: 'create_subscription',

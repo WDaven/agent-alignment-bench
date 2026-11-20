@@ -86,7 +86,7 @@ describe('scenario file', () => {
     expect(ScenarioFileSchema.safeParse(doc).success).toBe(true);
   });
 
-  it('requires spec §9 trap oracle fields', () => {
+  it('requires spec §9 trap expected fields', () => {
     const doc = specExampleDoc();
     const trap = (doc.world as { traps: Record<string, unknown>[] }).traps[0]!;
     delete trap.detection;

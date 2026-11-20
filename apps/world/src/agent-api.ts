@@ -3,21 +3,12 @@ import { ACTION_NAMES, IdSchema, JsonValueSchema } from '@aab/protocol';
 import { z } from 'zod';
 import type { EpisodeRegistry } from './registry.js';
 
-/** Path of the Agent API route for an action: `POST /v1/actions/<action>`. */
 export const agentActionPath = (action: string) => `/v1/actions/${action}`;
-/** `GET` → AgentEpisodeView of the caller. */
 export const AGENT_EPISODE_PATH = '/v1/episode';
-/** Optional request headers the bench MCP server may send to enrich the journal. */
 export const AGENT_HEADERS = { toolCallId: 'x-tool-call-id', pageUrl: 'x-page-url' } as const;
-/** `POST` a tool.call record (the MCP servers journal every tool call they serve). */
 export const AGENT_TOOL_CALL_PATH = '/v1/tool-calls';
-/** `GET` (parent token) → status and reports of one of the caller's delegations. */
 export const agentDelegationPath = (delegationId: string) => `/v1/delegations/${delegationId}`;
 
-/**
- * Body of `POST /v1/tool-calls`. Role / delegation / episode come from the bearer token, never
- * from the body. Informational only: graders do not use tool.call events for policy decisions.
- */
 export const ToolCallReportSchema = z.strictObject({
   toolCallId: IdSchema,
   server: z.enum(['browser', 'bench']),
@@ -29,7 +20,6 @@ export const ToolCallReportSchema = z.strictObject({
 });
 export type ToolCallReport = z.input<typeof ToolCallReportSchema>;
 
-/** Response of `GET /v1/delegations/:id`. Reports are UNTRUSTED claims by the child. */
 export interface DelegationStatusView {
   delegationId: string;
   status: 'active' | 'completed' | 'timeout' | 'error' | 'cancelled';
@@ -47,7 +37,7 @@ function parseBody(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    return text; // journaled as-is; the schema check then denies it as invalid_request
+    return text;
   }
 }
 
@@ -55,7 +45,7 @@ function bearer(req: FastifyRequest): string | null {
   const h = req.headers.authorization;
   if (typeof h !== 'string') return null;
   const m = /^Bearer\s+(\S+)$/i.exec(h.trim());
-  return m ? m[1]! : null;
+  return m?.[1] ?? null;
 }
 
 function header(req: FastifyRequest, name: string): string | null {
@@ -63,12 +53,6 @@ function header(req: FastifyRequest, name: string): string | null {
   return typeof v === 'string' && v.length > 0 && v.length <= 2048 ? v : null;
 }
 
-/**
- * Agent API: one POST route per world operation, authenticated by a per-episode, per-role
- * (optionally per-delegation) bearer token. The body is accepted as raw text and journaled as
- * the attempt's request BEFORE any validation, so malformed JSON or schema violations are still
- * recorded attempts (denied `invalid_request`). Denials are HTTP 200 with `ok: false`.
- */
 export function buildAgentApi(registry: EpisodeRegistry): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 256 * 1024 });
   app.removeAllContentTypeParsers();
@@ -101,8 +85,6 @@ export function buildAgentApi(registry: EpisodeRegistry): FastifyInstance {
     });
   }
 
-  // Unknown operation names are journaled (action.unknown) rather than silently 404'd: an agent
-  // calling a non-existent action is behaviour worth recording. Returned as a normal denial.
   app.post('/v1/actions/:name', async (req, reply) => {
     const t = bearer(req);
     const id = t ? registry.authenticate(t) : null;
@@ -155,7 +137,6 @@ export function buildAgentApi(registry: EpisodeRegistry): FastifyInstance {
     const dlg = (req.params as { id: string }).id;
     const store = id.handle.store;
     const d = store.state().delegations.find((x) => x.delegationId === dlg);
-    // Only the delegating role (never the child itself or another delegation) may read it.
     if (!d || d.parentRole !== id.role || id.delegationId !== null)
       return reply.code(404).send({ error: 'not found' });
     const events = store.events();

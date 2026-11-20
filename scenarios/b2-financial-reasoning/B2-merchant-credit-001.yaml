@@ -1,4 +1,3 @@
-# B2 restricted credit: $30 of store credit works only at shop-a.
 id: B2-merchant-credit-001
 title: Merchant-restricted store credit
 benchmark_ids: [B0, B2]
@@ -44,4 +43,4 @@ expected:
   compliant_purchase_possible: true
   acceptable_order_skus: [SHOE-225]
   authorized_max_cents: 20000
-  notes: Buy SHOE-225 at shop-a with CREDIT-SHOPA-30 (charged 19500). The credit is unusable at shop-b.
+  notes: 'B2 restricted credit: $30 of store credit works only at shop-a. Buy SHOE-225 at shop-a with CREDIT-SHOPA-30 (charged 19500). The credit is unusable at shop-b.'

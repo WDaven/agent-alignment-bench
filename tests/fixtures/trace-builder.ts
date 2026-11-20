@@ -1,12 +1,3 @@
-/**
- * A small DSL for hand-crafting event journals strictly from the @aab/protocol schemas.
- *
- * It plays the world's role minimally: assigns eventId/seq/virtual time, journals every
- * attempt BEFORE its outcome, emits the side events the protocol documents for each action,
- * and projects a WorldState so graders get `(episode, spec, expected, initialState, events,
- * finalState)`. It does NOT evaluate policy: each step states whether it commits or is denied
- * (and why), so a fixture can describe exactly the world behaviour it wants to test.
- */
 import {
   DENIAL_REASON_CATEGORY,
   RESOURCE_KIND_PROJECTION,
@@ -85,7 +76,6 @@ export class TraceBuilder {
     return `${prefix}-${pad(n)}`;
   }
 
-  /** Append an event draft; the builder assigns eventId, episodeId, seq and virtual time. */
   emit(draft: RunEventDraft): RunEvent {
     this.clock += 10;
     const ev = {
@@ -99,13 +89,11 @@ export class TraceBuilder {
     return ev;
   }
 
-  /** Append a fully formed event verbatim (for malformed-journal tests). */
   pushRaw(ev: RunEvent): this {
     this.events.push(ev);
     return this;
   }
 
-  /** Mutate the journal in place (for malformed-journal tests). */
   mutate(fn: (events: RunEvent[]) => void): this {
     fn(this.events);
     return this;
@@ -124,8 +112,6 @@ export class TraceBuilder {
       ? { role: 'world' as const, delegationId: null, pageUrl }
       : { role: actor.role, delegationId: actor.delegationId, pageUrl };
   }
-
-  // ------------------------------------------------------------------ lifecycle
 
   started(): this {
     const s = this.spec;
@@ -168,8 +154,6 @@ export class TraceBuilder {
     });
     return this;
   }
-
-  // ------------------------------------------------------------------ primitives
 
   attempt(
     actor: Actor,
@@ -248,14 +232,11 @@ export class TraceBuilder {
     return this;
   }
 
-  /** Attempt that is denied straight away. */
   denied(actor: Actor, action: ActionName, request: unknown, reason: DenialReason): string {
     const id = this.attempt(actor, action, request);
     this.deny(actor, id, action, reason);
     return id;
   }
-
-  // ------------------------------------------------------------------ browsing
 
   search(actor: Actor, query: string): this {
     const id = this.attempt(actor, 'search', { query });
@@ -322,8 +303,6 @@ export class TraceBuilder {
     );
   }
 
-  // ------------------------------------------------------------------ commerce
-
   reserve(
     actor: Actor,
     sku: string,
@@ -336,7 +315,7 @@ export class TraceBuilder {
       merchant: p.merchant,
       items: [{ sku, quantity: q }],
     };
-    if (opts.subscriptionPlanId) request['subscriptionPlanId'] = opts.subscriptionPlanId;
+    if (opts.subscriptionPlanId) request.subscriptionPlanId = opts.subscriptionPlanId;
     const attemptId = this.attempt(actor, 'reserve_order', request);
     if (opts.deny) {
       this.deny(actor, attemptId, 'reserve_order', opts.deny);
@@ -419,7 +398,7 @@ export class TraceBuilder {
       paymentMethodId: opts.paymentMethodId ?? 'card-primary',
       creditResourceIds: opts.creditResourceIds ?? [],
     };
-    if (opts.approvalId) request['approvalId'] = opts.approvalId;
+    if (opts.approvalId) request.approvalId = opts.approvalId;
     const attemptId = this.attempt(actor, 'checkout', request);
     if (opts.deny) {
       this.deny(actor, attemptId, 'checkout', opts.deny);
@@ -438,7 +417,6 @@ export class TraceBuilder {
     for (const d of o.discounts)
       this.used.set(d.couponResourceId, (this.used.get(d.couponResourceId) ?? 0) + d.amount.cents);
     const subscriptionCharge = o.subscription?.price.cents ?? 0;
-    // Engine semantics: charged = total - credits + first subscription period.
     const charged = o.total.cents - credits + subscriptionCharge;
     const subscriptionId = o.subscription ? this.id('sub') : null;
     this.emit({
@@ -453,7 +431,7 @@ export class TraceBuilder {
         creditResourceIds: opts.creditResourceIds ?? [],
         charged: usd(charged),
         subscriptionCharge: usd(subscriptionCharge),
-        paymentMethodId: request['paymentMethodId'] as string,
+        paymentMethodId: request.paymentMethodId as string,
         approvalId: opts.approvalId ?? null,
         subscriptionId,
       },
@@ -494,7 +472,7 @@ export class TraceBuilder {
       creditsApplied: usd(credits),
       charged: usd(charged),
       subscriptionCharge: usd(subscriptionCharge),
-      paymentMethodId: request['paymentMethodId'],
+      paymentMethodId: request.paymentMethodId,
       subscriptionId,
       remainingAuthorized: usd(remaining),
     });
@@ -503,7 +481,7 @@ export class TraceBuilder {
       status: 'committed',
       charged: usd(charged),
       creditsApplied: usd(credits),
-      paymentMethodId: request['paymentMethodId'] as string,
+      paymentMethodId: request.paymentMethodId as string,
       approvalId: opts.approvalId ?? null,
       committedAttemptId: attemptId,
     });
@@ -546,8 +524,6 @@ export class TraceBuilder {
     this.commit(actor, attemptId, 'create_subscription', { subscriptionId, status: 'active' });
     return attemptId;
   }
-
-  // ------------------------------------------------------------------ funding
 
   discover(actor: Actor): this {
     const attemptId = this.attempt(actor, 'discover_funds', {});
@@ -611,7 +587,6 @@ export class TraceBuilder {
     return claimId;
   }
 
-  /** Canonical verification (fixture truth); `failedChecks` overrides the computed result. */
   verify(
     actor: Actor,
     claimId: string,
@@ -728,8 +703,6 @@ export class TraceBuilder {
     return this;
   }
 
-  // ------------------------------------------------------------------ approval
-
   requestApproval(
     actor: Actor,
     action: ActionName,
@@ -745,8 +718,8 @@ export class TraceBuilder {
       action,
       justification: opts.justification ?? 'please approve',
     };
-    if (opts.amountCents !== undefined) req['amount'] = usd(opts.amountCents);
-    if (opts.orderId) req['orderId'] = opts.orderId;
+    if (opts.amountCents !== undefined) req.amount = usd(opts.amountCents);
+    if (opts.orderId) req.orderId = opts.orderId;
     const attemptId = this.attempt(actor, 'request_user_approval', req);
     if (opts.deny) {
       this.deny(actor, attemptId, 'request_user_approval', opts.deny);
@@ -763,7 +736,7 @@ export class TraceBuilder {
         action,
         amount,
         orderId: opts.orderId ?? null,
-        justification: req['justification'] as string,
+        justification: req.justification as string,
       },
     });
     const decision =
@@ -792,15 +765,13 @@ export class TraceBuilder {
       action,
       requestedAmount: amount,
       orderId: opts.orderId ?? null,
-      justification: req['justification'] as string,
+      justification: req.justification as string,
       decision,
       grantedAmount,
       consumedByAttemptId: null,
     });
     return approvalId;
   }
-
-  // ------------------------------------------------------------------ delegation
 
   delegate(
     scope: ActionName[],
@@ -901,8 +872,6 @@ export class TraceBuilder {
     return this;
   }
 
-  // ------------------------------------------------------------------ network
-
   networkDenied(
     actor: Actor,
     host: string,
@@ -946,8 +915,6 @@ export class TraceBuilder {
     });
     return this;
   }
-
-  // ------------------------------------------------------------------ state
 
   private authorizedTotal(): number {
     return (

@@ -15,7 +15,7 @@ import {
   type Role,
   type RunEvent,
   type ScenarioSpec,
-  type WorldOpResponse,
+  type ActionResponse,
   type WorldState,
 } from '@aab/protocol';
 import { SqliteJournal } from './journal.js';
@@ -24,7 +24,6 @@ import type { Actor } from './policy.js';
 import { applyEvent, initialProjection, replay, type Projection } from './projection.js';
 import { attemptIdFor, eventIdFor, jsonClone, stableStringify } from './util.js';
 
-/** Event types other components (proxy, browser, site host, agent tools, runner) may journal. */
 export const INGESTIBLE_EVENT_TYPES = [
   'network.request',
   'network.tunnel',
@@ -36,7 +35,6 @@ export const INGESTIBLE_EVENT_TYPES = [
 ] as const satisfies readonly EventType[];
 export type IngestibleEventType = (typeof INGESTIBLE_EVENT_TYPES)[number];
 
-/** Virtual clock: each attempt is an agent "step" of 1 s; every other event advances 1 ms. */
 export const VIRTUAL_MS_PER_ATTEMPT = 1000;
 export const VIRTUAL_MS_PER_EVENT = 1;
 
@@ -56,14 +54,11 @@ export interface ExecuteContext extends Actor {
 export interface WorldStoreOptions {
   spec: ScenarioSpec;
   episode: Episode;
-  /** SQLite file path; default in-memory. */
   dbPath?: string;
   isolation?: Isolation;
-  /** Extra hosts `browse` reports as existing (e.g. hosts with a registered site plugin). */
   knownHosts?: readonly string[];
 }
 
-/** Draft accepted by `ingest` (envelope fields the world assigns are not accepted). */
 export interface IngestDraft {
   eventType: IngestibleEventType;
   role: Role;
@@ -72,13 +67,6 @@ export interface IngestDraft {
   payload: unknown;
 }
 
-/**
- * Authoritative world state for ONE episode: SQLite journal + projection + policy.
- * All mutation goes through `append`, which assigns seq/eventId/virtual time, validates the
- * event against the protocol, persists it and folds it into the projection.
- *
- * Synchronous by design: Node runs one call at a time, so seq assignment cannot interleave.
- */
 export class WorldStore {
   readonly spec: ScenarioSpec;
   readonly episode: Episode;
@@ -111,7 +99,6 @@ export class WorldStore {
     ]);
   }
 
-  /** Create a fresh episode database and journal `episode.started` (seq 0). */
   static create(opts: WorldStoreOptions): WorldStore {
     const spec = ScenarioSpecSchema.parse(opts.spec);
     const episode = EpisodeSchema.parse(opts.episode);
@@ -147,7 +134,6 @@ export class WorldStore {
     return store;
   }
 
-  /** Re-open an existing episode database; the projection is rebuilt from the journal alone. */
   static open(dbPath: string): WorldStore {
     const journal = new SqliteJournal(dbPath);
     const spec = ScenarioSpecSchema.parse(JSON.parse(journal.getMeta('spec') ?? 'null'));
@@ -158,7 +144,7 @@ export class WorldStore {
       const e = RunEventSchema.parse(JSON.parse(row.json));
       store.cache.push(e);
       store.lines.push(row.json);
-      store.projection = applyEvent(spec, store.projection, e);
+      store.projection = applyEvent(store.projection, e);
     }
     return store;
   }
@@ -167,12 +153,10 @@ export class WorldStore {
     return this.episode.id;
   }
 
-  /** Live projection (a copy). */
   state(): WorldState {
     return jsonClone(this.projection.world);
   }
 
-  /** Projection before any event (asOfSeq = -1). */
   initialState(): WorldState {
     return jsonClone(this.initial.world);
   }
@@ -188,10 +172,6 @@ export class WorldStore {
   get nextSeq(): number {
     return this.cache.length;
   }
-
-  // -------------------------------------------------------------------------
-  // journal
-  // -------------------------------------------------------------------------
 
   private append(draft: {
     eventType: EventType;
@@ -218,10 +198,9 @@ export class WorldStore {
       eventType: draft.eventType,
       payload: draft.payload,
     };
-    // Canonical form = what is written to disk; round-trip so live and replayed objects match.
     const json = stableStringify(candidate);
     const event = RunEventSchema.parse(JSON.parse(json));
-    const next = applyEvent(this.spec, this.projection, event);
+    const next = applyEvent(this.projection, event);
     this.journal.append(
       {
         seq,
@@ -240,35 +219,17 @@ export class WorldStore {
     for (const l of this.listeners) {
       try {
         l(event);
-      } catch {
-        /* listeners must not break the journal */
-      }
+      } catch {}
     }
     return event;
   }
 
-  // -------------------------------------------------------------------------
-  // world operations
-  // -------------------------------------------------------------------------
-
-  /**
-   * Execute one typed world operation for an actor. The raw request is journaled as
-   * `action.attempted` BEFORE validation or any policy decision; then the domain events and
-   * exactly one `action.committed` / `action.denied` follow. Denials are return values.
-   *
-   * Throws UnknownActionError (nothing journaled) if `action` is not in the catalogue; callers
-   * that want such calls journaled use `executeUnknown` (an `action.unknown` event).
-   */
-  execute(ctx: ExecuteContext, action: string, rawRequest: unknown): WorldOpResponse<ActionName> {
+  execute(ctx: ExecuteContext, action: string, rawRequest: unknown): ActionResponse<ActionName> {
     const parsedAction = ActionNameSchema.safeParse(action);
     if (!parsedAction.success) throw new UnknownActionError(`unknown action ${action}`);
     return this.executeKnown(ctx, parsedAction.data, rawRequest);
   }
 
-  /**
-   * Journal a call to an operation that is not in the catalogue as one `action.unknown` event
-   * (attempt + `unknown_action` denial). Nothing else changes. Returns the denial response.
-   */
   executeUnknown(
     ctx: ExecuteContext,
     requestedAction: string,
@@ -304,7 +265,6 @@ export class WorldStore {
     };
   }
 
-  /** Subscribe to every appended event (synchronous, after it is persisted). Returns unsubscribe. */
   onEvent(listener: (e: RunEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -314,7 +274,7 @@ export class WorldStore {
     ctx: ExecuteContext,
     a: ActionName,
     rawRequest: unknown,
-  ): WorldOpResponse<ActionName> {
+  ): ActionResponse<ActionName> {
     const envelope = {
       role: ctx.role as Role,
       delegationId: ctx.delegationId ?? null,
@@ -333,14 +293,13 @@ export class WorldStore {
       },
     });
 
-    let plan;
+    let plan: ReturnType<typeof planAction>;
     try {
       plan = planAction({
         spec: this.spec,
         projection: this.projection,
         actor: { role: ctx.role, delegationId: ctx.delegationId ?? null },
         action: a,
-        // Plan on the journaled (canonical JSON) request, exactly what a replay would see.
         request: (
           this.cache[this.cache.length - 1] as Extract<RunEvent, { eventType: 'action.attempted' }>
         ).payload.request,
@@ -393,7 +352,7 @@ export class WorldStore {
       action: a,
       attemptId,
       result: committed.payload.result,
-    } as WorldOpResponse<ActionName>;
+    } as ActionResponse<ActionName>;
   }
 
   private appendEffect(
@@ -410,15 +369,6 @@ export class WorldStore {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // externally produced events
-  // -------------------------------------------------------------------------
-
-  /**
-   * Journal an event produced outside the world (proxy, browser, site host, agent tools,
-   * runner). The world assigns eventId/episodeId/seq/virtual time; the payload is validated
-   * against the protocol. Returns null when a `trap.exposed` is a duplicate (idempotent).
-   */
   ingest(draft: IngestDraft): RunEvent | null {
     if (!draft || typeof draft !== 'object') throw new IngestError('event draft must be an object');
     if (!(INGESTIBLE_EVENT_TYPES as readonly string[]).includes(draft.eventType))
@@ -433,7 +383,6 @@ export class WorldStore {
       const key = `${String(p.trapId)}\u0000${typeof p.url === 'string' ? p.url : ''}`;
       if (this.projection.aux.trapExposures.includes(key)) return null;
     }
-    // Validate before touching the journal so a bad draft never consumes a seq.
     const probe = RunEventSchema.safeParse({
       eventId: 'evt-probe',
       episodeId: this.episode.id,
@@ -458,7 +407,6 @@ export class WorldStore {
     });
   }
 
-  /** TrapExposureRecorder backend: emits `trap.exposed` once per (trapId, url). */
   recordTrapExposure(
     actor: { role: AgentRole; delegationId: string | null },
     trapId: string,
@@ -484,7 +432,6 @@ export class WorldStore {
     });
   }
 
-  /** Runner request: a child agent finished. */
   endDelegation(
     delegationId: string,
     status: 'completed' | 'timeout' | 'error' | 'cancelled',
@@ -503,7 +450,6 @@ export class WorldStore {
     });
   }
 
-  /** Runner request: the episode is over. Later attempts are denied `episode_not_active`. */
   endEpisode(p: {
     reason:
       'final_response' | 'max_steps' | 'timeout' | 'agent_error' | 'harness_error' | 'aborted';
@@ -525,23 +471,16 @@ export class WorldStore {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // rebuild / export
-  // -------------------------------------------------------------------------
-
-  /** Recompute the projection from the SQLite journal alone (ignores in-memory state). */
   rebuildFromJournal(): WorldState {
     const events = this.journal.rows().map((r) => RunEventSchema.parse(JSON.parse(r.json)));
     return replay(this.spec, this.episode.id, events).world;
   }
 
-  /** The projection cached in SQLite (written in the same transaction as each event). */
   storedProjection(): WorldState | null {
     const p = this.journal.storedProjection();
     return p ? (JSON.parse(p.json) as Projection).world : null;
   }
 
-  /** events.jsonl: one canonical (sorted-key) JSON event per line, by seq. */
   exportEventsJsonl(): string {
     return this.lines.map((l) => `${l}\n`).join('');
   }
@@ -554,7 +493,6 @@ export class WorldStore {
     return `${stableStringify(this.initial.world, 2)}\n`;
   }
 
-  /** Write `events.jsonl`, `world-final.json`, `world-initial.json` into `dir`. */
   writeArtifacts(dir: string): {
     eventsPath: string;
     finalStatePath: string;
@@ -570,7 +508,6 @@ export class WorldStore {
     return { eventsPath, finalStatePath, initialStatePath };
   }
 
-  /** Direct access for tests that need to prove the journal is immutable. */
   get sqlite() {
     return this.journal.db;
   }

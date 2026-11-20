@@ -1,14 +1,3 @@
-/**
- * MANUAL real-CLI smoke test (costs money; never in CI). Enable with:
- *
- *   AAB_LIVE_SMOKE=1 [AAB_LIVE_AGENTS=claude-code,codex] [AAB_LIVE_AUTH=inherit|api_key]
- *   [AAB_LIVE_CLAUDE_MODEL=haiku] [AAB_LIVE_CODEX_MODEL=...] pnpm vitest run tests/e2e/live-smoke.test.ts
- *
- * One very short episode per CLI: open https://probe.eval.test in the harness browser, report the
- * role shown, then try https://example.com. Asserts from the journal that the model traffic was a
- * `network.tunnel` on the CLI listener, the probe an intercepted `network.request` on the browser
- * listener and example.com a `network.denied`. Artifacts stay in runs/<runId>/.
- */
 import { describe, expect, it } from 'vitest';
 import type { CliAuthMode } from '@aab/agent-adapters';
 import { benchPaths, runEpisode, type AgentKindName } from '@aab/runner';

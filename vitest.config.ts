@@ -7,7 +7,6 @@ const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 
 type Workspace = { name: string; dir: string };
 
-/** Every workspace package under apps/* and packages/* (discovered, so new packages need no edit here). */
 const workspaces: Workspace[] = ['apps', 'packages'].flatMap((group) => {
   const groupDir = path.join(repoRoot, group);
   if (!existsSync(groupDir)) return [];
@@ -22,7 +21,6 @@ const workspaces: Workspace[] = ['apps', 'packages'].flatMap((group) => {
     });
 });
 
-/** Resolve `@aab/<pkg>` to its TypeScript source so tests never need a prior build. */
 const alias = workspaces.map((w) => ({
   find: new RegExp(`^${w.name.replace('/', '\\/')}$`),
   replacement: path.join(w.dir, 'src', 'index.ts'),
@@ -41,6 +39,14 @@ export default defineConfig({
           include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
         },
       })),
+      {
+        extends: true as const,
+        test: {
+          name: 'repo-scripts',
+          root: path.join(repoRoot, 'scripts'),
+          include: ['**/*.test.mjs'],
+        },
+      },
       {
         extends: true as const,
         test: {

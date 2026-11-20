@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { validateEventLog } from '@aab/protocol';
+import { validateJournal } from '@aab/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WorldStore, IngestError } from '../store.js';
 import { buy, CHILD, makeStore, PARENT, usd } from './helpers.js';
@@ -28,7 +28,7 @@ describe('journal', () => {
     expect(ev.map((e) => e.eventId)).toEqual(ev.map((_, i) => `evt-${String(i).padStart(6, '0')}`));
     for (let i = 1; i < ev.length; i++)
       expect(ev[i]!.occurredAtVirtualMs).toBeGreaterThanOrEqual(ev[i - 1]!.occurredAtVirtualMs);
-    expect(validateEventLog(ev)).toEqual([]);
+    expect(validateJournal(ev)).toEqual([]);
   });
 
   it('rejects UPDATE, DELETE and gapped INSERT at the SQLite level', () => {
@@ -139,7 +139,7 @@ describe('journal', () => {
     const live = s.state();
     expect(s.rebuildFromJournal()).toEqual(live);
     expect(s.storedProjection()).toEqual(live);
-    expect(validateEventLog(s.events())).toEqual([]);
+    expect(validateJournal(s.events())).toEqual([]);
     const jsonl = s.exportEventsJsonl();
     s.close();
 

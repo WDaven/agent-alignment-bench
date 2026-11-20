@@ -1,9 +1,3 @@
-/**
- * One episode, spec §10 lifecycle:
- *  1 load (caller)  2 materialize  3 start world/proxy listeners  4 start browser  5 start agent
- *  6 capture  7 stop (final response / max steps / timeout / error)  8 grade (HERE, in the runner:
- *  the hidden `expected` never enters the world or an agent process)  9 write artifacts  10 reset.
- */
 import { createHmac, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -39,24 +33,18 @@ import { benchPaths, newRunId, stableIdSecret, type BenchPaths } from './paths.j
 
 export interface RunEpisodeOptions {
   spec: ScenarioSpec;
-  /** Grader-only answer key. Used after the agent stopped; never passed to world or agent. */
   expected: ScenarioExpected;
   agent: AgentSpec;
   seed?: number;
   repetition?: number;
   suite?: string | null;
   headed?: boolean;
-  /** Launch the controlled Chromium (default true). */
   browser?: boolean;
   paths?: BenchPaths;
   runId?: string;
-  /** Use an existing backend (tests / compose). Default: a fresh LocalBackend for this episode. */
   backend?: EpisodeBackend;
-  /** Limits for delegated children (default: the child's view maxSteps / maxWallMs). */
   childLimits?: ChildLimits;
-  /** Site plugins for the default LocalBackend (none ship yet besides probe.eval.test). */
   plugins?: readonly WorldSitePlugin[];
-  /** Called with live handles once the agent is about to start (tests, leakage probes). */
   onReady?: (ctx: LiveEpisode) => Promise<void> | void;
   log?: (line: string) => void;
 }
@@ -68,7 +56,6 @@ export interface LiveEpisode {
   tools: AgentTools;
   browser: ControlledBrowser | null;
   listeners: { browser: { port: number; url: string } | null; cli: { port: number; url: string } };
-  /** Per-run scratch dir (agent-reachable paths live here). */
   scratch: string;
 }
 
@@ -109,9 +96,7 @@ function envBuildHash(root: string): string {
       .trim()
       ? '-dirty'
       : '';
-  } catch {
-    /* not a git checkout */
-  }
+  } catch {}
   return `${commit.slice(0, 12)}${dirty}+node${process.versions.node}+protocol${PROTOCOL_VERSION}`;
 }
 
@@ -135,10 +120,6 @@ interface RoleEnv {
   listeners: LiveEpisode['listeners'];
 }
 
-/**
- * Provision one role (parent or one delegated child): its own proxy listeners (browser =
- * intercept-only, cli = model-API passthrough), its own Chromium profile, token file and MCP specs.
- */
 async function provisionRole(o: {
   backend: EpisodeBackend;
   view: AgentEpisodeView;
@@ -246,8 +227,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
   const startedAt = new Date().toISOString();
   const ownBackend = !opts.backend;
-  // Only a local backend needs the CA private key (it hosts the proxy). In compose mode the
-  // runner container holds public trust material only (ca.pem, ca-bundle.pem, leaf-pub.pem).
   const backend =
     opts.backend ??
     (await LocalBackend.start({
@@ -262,7 +241,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
   let delegations: DelegationManager | null = null;
   let liveEpisodeId: string | null = null;
   try {
-    // 2. materialize (world view only — `expected` stays in this function's scope)
     const episodeId = episodeIdFor(p, opts.spec, seed, repetition);
     const m = await backend.materialize({ spec: opts.spec, seed, runId, episodeId });
     const episode = m.episode;
@@ -275,7 +253,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
     });
     artifacts.writeEpisode(episode);
 
-    // 3-4. listeners + browser for the parent
     const useBrowser = opts.browser !== false;
     const parentEnv = await provisionRole({
       backend,
@@ -313,7 +290,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
       onLog: (line) => log(`[${delegationId ?? role}] ${line}`),
     });
 
-    // Delegation lifecycle: children get their own token, listeners, browser and trace dir.
     const factory = ({
       role,
       delegationId,
@@ -378,7 +354,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
     );
     delegations.start();
 
-    // 5. agent
     parentAdapter = factory({ role: 'parent' });
     const support = isFullyControlled(parentAdapter.capabilities) ? 'supported' : 'unsupported';
     if (support === 'unsupported')
@@ -396,7 +371,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
     });
     await parentAdapter.start(m.agentViews.parent, parentEnv.tools, observerFor('parent', null));
 
-    // 6-7. run until done (adapter enforces wall clock / turns), then wait for children.
     const agentResult = await parentAdapter.runUntilDone();
     await parentAdapter.stop().catch(() => undefined);
     await delegations.stopAll();
@@ -409,7 +383,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
       });
     const st = await backend.state(episode.id);
     const endReason = endReasonFor(agentResult, st.lifecycle.stepsUsed, episode.maxSteps);
-    // Close browsers/listeners before ending, so late network events are journaled in-episode.
     for (const c of cleanups.splice(0).reverse()) await c().catch(() => undefined);
     await backend.endEpisode(episode.id, {
       reason: endReason,
@@ -420,7 +393,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
       `agent ${agentResult.status}${agentResult.error ? ` (${agentResult.error})` : ''}; episode ended: ${endReason}`,
     );
 
-    // export
     const events = await backend.events(episode.id);
     const finalState = await backend.state(episode.id);
     const initialState = await backend.initialState(episode.id);
@@ -433,7 +405,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
       parsed: initialState,
     });
 
-    // 8. grade (the agent has stopped; only now does `expected` meet the journal)
     artifacts.setLive(false);
     const grade = gradeEpisode({
       episode,
@@ -495,7 +466,6 @@ export async function runEpisode(opts: RunEpisodeOptions): Promise<EpisodeResult
     );
     return { runId, runDir, episode, agentResult, endReason, grade, events, finalState, meta };
   } finally {
-    // 10. reset: stop agents, close browsers (profiles deleted), remove listeners, drop the DB.
     await parentAdapter?.stop().catch(() => undefined);
     await delegations?.stopAll().catch(() => undefined);
     for (const c of cleanups.reverse()) await c().catch(() => undefined);

@@ -61,7 +61,7 @@ describe('aggregate', () => {
     expect(agg.pooledAttackSuccess).toMatchObject({ n: 2, successes: 2, ci: null });
     const b5 = agg.benchmarks.find((b) => b.benchmark === 'B5')!;
     expect(b5.runs).toBe(5);
-    expect(b5.metrics['attack_success_rate']).toMatchObject({ kind: 'rate', n: 2 });
+    expect(b5.metrics.attack_success_rate).toMatchObject({ kind: 'rate', n: 2 });
     expect(b5.violationRuns).toEqual({ trap_attack_succeeded: 2 });
   });
 
@@ -80,7 +80,7 @@ describe('aggregate', () => {
     expect(agg.benchmarks.find((b) => b.benchmark === 'B5')!.runs).toBe(1);
     expect(agg.benchmarks.find((b) => b.benchmark === 'B6')!.runs).toBe(1);
     expect(agg.benchmarks.find((b) => b.benchmark === 'B3')).toBeUndefined();
-    expect(agg.attackVsCleanDelta).toBeNull(); // no clean counterpart
+    expect(agg.attackVsCleanDelta).toBeNull();
   });
 
   it('violation_rate_by_difficulty slices B6 runs', () => {
@@ -99,13 +99,13 @@ describe('aggregate', () => {
   it('boolean metrics become rates, numeric metrics means', () => {
     const agg = aggregate([run(T.knownGood), run(T.overBudgetDenied)]);
     const b0 = agg.benchmarks.find((b) => b.benchmark === 'B0')!;
-    expect(b0.metrics['valid_task_end_state']).toMatchObject({ kind: 'rate', n: 2, successes: 1 });
-    expect(b0.metrics['appropriate_escalation_when_infeasible']).toMatchObject({
+    expect(b0.metrics.valid_task_end_state).toMatchObject({ kind: 'rate', n: 2, successes: 1 });
+    expect(b0.metrics.appropriate_escalation_when_infeasible).toMatchObject({
       kind: 'mean',
       n: 0,
     });
     const b1 = agg.benchmarks.find((b) => b.benchmark === 'B1')!;
-    expect(b1.metrics['unauthorized_action_attempt_rate']).toMatchObject({
+    expect(b1.metrics.unauthorized_action_attempt_rate).toMatchObject({
       kind: 'mean',
       n: 2,
       mean: 0.25,

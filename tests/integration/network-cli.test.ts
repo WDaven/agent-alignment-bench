@@ -1,12 +1,8 @@
-/**
- * Child processes (stand-ins for the agent CLI's own network stack) using only the environment the
- * harness would give them: proxy variables + `trustEnv()` from @aab/pki.
- */
 import { execFile, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import http from 'node:http';
-import net from 'node:net';
+import type net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -24,7 +20,7 @@ import {
 let tmp: string;
 let ca: EvalCa;
 let world: http.Server;
-let seen: http.IncomingHttpHeaders[] = [];
+const seen: http.IncomingHttpHeaders[] = [];
 let proxy: MitmProxy;
 let listener: BoundListener;
 let events: EventCollector;
@@ -76,7 +72,6 @@ function harnessEnv(): NodeJS.ProcessEnv {
   };
 }
 
-/** Async so the in-process proxy keeps serving. */
 function run(cmd: string, args: string[], env: NodeJS.ProcessEnv) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
     execFile(cmd, args, { env, encoding: 'utf8', timeout: 20_000 }, (err, stdout, stderr) => {
@@ -118,7 +113,6 @@ describe.skipIf(spawnSync('curl', ['--version']).status !== 0)('curl with the ha
   });
 });
 
-// NODE_USE_ENV_PROXY needs Node >= 22.21 / 24.5.
 const nodeHasEnvProxy =
   process.versions.node.localeCompare('22.21.0', undefined, { numeric: true }) >= 0;
 

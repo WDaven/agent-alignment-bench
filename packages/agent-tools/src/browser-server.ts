@@ -1,19 +1,3 @@
-/**
- * `browser` MCP server: drives the harness-owned Chromium of ONE role over CDP (Playwright
- * `connectOverCDP`). Compact tool set; every call is journaled as `tool.call` through the world.
- *
- * Why not `@playwright/mcp --cdp-endpoint`: (1) it pins its own Playwright build (0.0.86 depends on
- * playwright 1.66 alpha; this repo uses 1.65.1), so the runner image would carry two Playwright
- * copies and fetching it at run time is impossible without internet; (2) it has no hook to journal
- * each call into the world event log; (3) its tool surface includes code evaluation / file upload
- * / arbitrary network inspection that we would have to filter anyway; (4) refusing non-http(s)
- * schemes for *every* content-returning tool (not just navigate) needs to live in the server.
- * A ~300-line server we own is easier to audit than a filtered third-party one.
- *
- * Content returned to the model only ever comes from http(s) pages (or about:blank): any tool
- * that would read a page whose URL has another scheme (file:, chrome:, view-source:, data:,
- * javascript:, blob:, ...) navigates that tab to about:blank and refuses.
- */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -25,17 +9,20 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 import { z } from 'zod';
-import { AgentApiClient, toJsonValue, toolCallIdFactory } from './world-client.js';
+import { type AgentApiClient, toJsonValue, toolCallIdFactory } from './world-client.js';
 import { TOOLS_VERSION } from './bench-server.js';
+
+function firstLine(text: string): string {
+  const end = text.indexOf('\n');
+  return end === -1 ? text : text.slice(0, end);
+}
 
 export const BROWSER_SERVER_NAME = 'browser';
 
-/** Schemes a page may have for its content to be returned to the model. */
 export function isAllowedPageUrl(url: string): boolean {
   return /^https?:\/\//i.test(url) || url === 'about:blank';
 }
 
-/** Validates a navigation target: absolute http(s) only. */
 export function checkNavigationUrl(
   raw: string,
 ): { ok: true; url: string } | { ok: false; error: string } {
@@ -99,7 +86,7 @@ const DESCRIPTIONS: Record<ToolName, string> = {
 export function browserToolDefinitions(): Tool[] {
   return (Object.keys(ARGS) as ToolName[]).map((name) => {
     const schema = z.toJSONSchema(ARGS[name], { io: 'input' }) as Record<string, unknown>;
-    delete schema['$schema'];
+    delete schema.$schema;
     return {
       name,
       description: DESCRIPTIONS[name],
@@ -108,11 +95,6 @@ export function browserToolDefinitions(): Tool[] {
   });
 }
 
-/**
- * In-page script: tag interactive elements with refs and return a compact outline. Kept as
- * source TEXT (not a TS function) so no transpiler helper (e.g. esbuild's `__name`) leaks into
- * the page context.
- */
 export const SNAPSHOT_SCRIPT = String.raw`(attr) => {
   for (const el of Array.from(document.querySelectorAll('[' + attr + ']'))) el.removeAttribute(attr);
   const visible = (el) => {
@@ -180,9 +162,10 @@ export async function createBrowserServer(opts: BrowserServerOptions): Promise<{
       return (await context()).newPage();
     }
     if (current >= ps.length) current = ps.length - 1;
-    return ps[current]!;
+    const selected = ps[current];
+    if (!selected) throw new Error(`no tab ${current}`);
+    return selected;
   };
-  /** Refuse to return content from non-http(s) pages (file:, chrome:, view-source:, data:...). */
   const guard = async (p: Page) => {
     const url = p.url();
     if (!isAllowedPageUrl(url)) {
@@ -296,9 +279,10 @@ export async function createBrowserServer(opts: BrowserServerOptions): Promise<{
         } else if (a.action === 'switch' || a.action === 'close') {
           const ps = ctx.pages();
           const i = a.index ?? current;
-          if (i >= ps.length) throw new Error(`no tab ${i}`);
+          const tab = ps[i];
+          if (!tab) throw new Error(`no tab ${i}`);
           if (a.action === 'close') {
-            await ps[i]!.close();
+            await tab.close();
             current = Math.max(0, Math.min(current, ctx.pages().length - 1));
           } else current = i;
         }
@@ -340,16 +324,14 @@ export async function createBrowserServer(opts: BrowserServerOptions): Promise<{
       if (!(name in ARGS)) throw new Error(`no tool named ${name}`);
       result = await run(name as ToolName, args);
     } catch (err) {
-      error = err instanceof Error ? err.message.split('\n')[0]!.slice(0, 500) : String(err);
+      error = err instanceof Error ? firstLine(err.message).slice(0, 500) : String(err);
       result = { content: [{ type: 'text', text: `error: ${error}` }], isError: true };
     }
     let pageUrl: string | null = null;
     try {
       const u = (await page()).url();
       pageUrl = isAllowedPageUrl(u) ? u : null;
-    } catch {
-      /* ignore */
-    }
+    } catch {}
     await opts.client.reportToolCall({
       toolCallId,
       server: 'browser',
@@ -365,7 +347,6 @@ export async function createBrowserServer(opts: BrowserServerOptions): Promise<{
   return {
     server,
     async close() {
-      // Disconnect only; the runner owns (and closes) the browser.
       browser = null;
     },
   };
